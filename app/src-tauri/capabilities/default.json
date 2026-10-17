@@ -1,0 +1,14 @@
+{
+  "identifier": "default",
+  "description": "Inkdesk main window capabilities",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "sql:default",
+    "dialog:default",
+    "shell:allow-open"
+  ]
+}
