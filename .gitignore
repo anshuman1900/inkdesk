@@ -1,0 +1,21 @@
+# Inkdesk clean-room policy: never commit original app assets, reference
+# screenshots, or reverse-engineering artifacts. They stay local only.
+replica/screens/
+replica/rea-notes/
+
+# build & tooling
+node_modules/
+dist/
+target/
+.vite/
+*.log
+*.tsbuildinfo
+
+# OS noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# local env
+.env
+.env.*

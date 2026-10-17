@@ -1,0 +1,63 @@
+feature,area,priority,original_tier,clone,notes
+Open/view PDF,viewer,must,Free,no,Core. pdf.js render; password-protected PDFs supported
+Multi-document tabs,viewer,must,Free,no,S02; tab overflow handling
+Pan/zoom + fit modes,viewer,must,Free,no,Hand tool; pinch (touch) and ctrl+wheel
+Night mode,viewer,must,Free,no,Dark rendering of pages; per-doc toggle
+Page indicator + jump,viewer,must,Free,no,S03 chip; tap to open page picker
+Navigation history (back to last page),viewer,should,Free,no,Toggle in settings; forward+back stack
+Continuous scroll + single page layout modes,viewer,should,Free,no,Layout options in settings
+Pen ink (pressure-sensitive),draw,must,Free (pressure: Pro Lite),no,THE core loop. Pointer Events pressure; zero-lag rendering
+Multiple pen slots + presets,draw,must,Free,no,Radial has 2 pen slots; save configs
+Highlighter (freehand),draw,must,Free,no,Multiply blend under text? over text like original
+Eraser (per-stroke),draw,must,Free,no,Hit-test strokes; size setting
+Undo/redo,draw,must,Free,no,Per-document stacks
+Text review: highlight/underline/strikeout/squiggly,draw,must,Free,no,Select real text; 4 styles; also 'remove text review'
+Text review export .txt/.csv,export,could,Pro Plus,no,Quoted annotations list
+Selection: rect/text/lasso,edit,must,Free,no,S18; move/copy/delete/z-order
+Laser pointer,edit,could,Free,no,Fades after ~2s; presentation tool
+Shapes: line/arrow/rect/ellipse/polygon/polyline/cloud,draw,must,Free,no,7 shapes per listing
+Engineering line styles (dash/dot),draw,should,Pro Lite,no,Applied to lines/shapes
+Color picker (custom colors),draw,should,Pro Lite,no,S07; beyond preset swatches
+Insert textbox,insert,must,Free,no,Editable on canvas
+Insert note (sticky),insert,must,Free,no,Collapsed icon expandable
+Insert callout,insert,could,Pro Plus,no,Pointer + box; flag for review
+Insert image from file,insert,must,Free,no,Camera N/A on desktop
+Insert signature + signature bank,insert,must,Free (2 saved) / Pro unlimited,no,Draw or type; store bank locally
+Audio notes,insert,could,Pro Lite,no,Record + pin to page
+Hyperlinks (text to URL/page/area),insert,could,Pro Lite,no,Link annotations
+Stamps + markup library,insert,could,Pro Plus (stickies),no,Save reusable markups
+Redaction,security,could,Pro Unlimited,no,True content removal, not black box overlay
+Pages grid view,edit,must,Free,no,S08 thumbnails
+Reorder pages (drag & drop),edit,must,Free,no,Touch-first drag
+Insert/rotate/duplicate/delete pages,edit,must,Free,no,From file or blank
+Create blank PDF (size/color/orientation/pages),notes,must,Free,no,S16; the notes-app entry
+Grid & line templates + overlays,notes,should,Pro Lite,no,Rendered under ink; exported in flatten
+Bookmarks,nav,must,Free,no,Add/remove/jump
+Document search,nav,must,Free,no,Text layer search + results
+Markup history / annotations list,edit,should,Free (detailed: Pro Plus),no,S14; jump-to-annotation
+Flatten annotations,save,must,Free,no,Bake into page; confirm dialog
+Save (override) / Save as new,save,must,Free,no,Dirty-state tracking
+Reduce file size (compress),save,could,Pro Lite,no,Image recompress levels
+Print,save,must,Free,no,Windows print dialog
+Share (OS share / email),save,should,Free,no,Windows share contract
+Export annotated pages only,save,could,Pro,no,Page subset export
+Radial menu,ui,must,Free (toggleable),no,S04; 8 slots; settings toggle
+Favorites toolbar (dockable, reorderable),ui,must,Free (7 tools) / Pro unlimited,no,S05; drag anywhere on screen edges
+Multiple named toolbars + presets + import,ui,should,Pro,no,Construction/Architecture presets; import/export
+Tool properties popover,ui,must,Free,no,S07 per-tool
+Stylus vs touch toggle (palm rejection),input,must,Free,no,Critical for pen users
+Custom keyboard shortcuts,input,could,Pro Plus,no,Rebindable
+Z-order control,edit,could,Pro Plus,no,Bring forward/back
+Align/distribute selection,edit,could,Pro Plus,no,
+Tags on documents,org,could,Pro Plus,no,Filter recents by tag
+Snapshot (region to clipboard),tools,could,Pro Plus,no,
+Document Builder (merge/reorder docs),tools,should,Pro Lite,no,S15; separate builder screen
+Measurement: calibrate + length/polylength/area,tools,could,Pro Plus,no,S10; units; phase 2
+Digital protractor (angle ink snap),tools,could,Pro Plus,no,Overlay; ink snaps; phase 2
+3rd-party cloud sync (OneDrive/Dropbox/Drive),sync,skip,Pro Plus,no,Local-first; OS folder sync works anyway
+Store+Share real-time collaboration,sync,skip,Pro,no,Owned network — needs own backend if ever
+Accounts/licensing/subscription tiers,meta,skip,Pro,no,Clone is free/local
+Drawboard AI,ai,skip,Pro,no,Their service
+Office (Word) to PDF conversion,convert,skip,Pro Lite,no,Local converter possible later
+Surface Dial integration,hardware,could,Pro,no,Generic Windows radial API possible
+Web/iOS/Android versions,platform,skip,Pro,no,Desktop only per scope
