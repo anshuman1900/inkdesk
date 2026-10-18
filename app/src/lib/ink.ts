@@ -50,6 +50,47 @@ export interface ShapeGeometry {
 
 export type ReviewStyle = "highlight" | "underline" | "squiggle" | "strike";
 
+/** sample points along a shape's stroke for eraser hit-testing (page units) */
+export function shapeStrokePoints(g: ShapeGeometry): number[][] {
+  const out: number[][] = [];
+  const push = (x: number, y: number) => out.push([x, y]);
+  const seg = (x1: number, y1: number, x2: number, y2: number) => {
+    const steps = Math.max(3, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 6));
+    for (let i = 0; i <= steps; i++) push(x1 + ((x2 - x1) * i) / steps, y1 + ((y2 - y1) * i) / steps);
+  };
+  const x0 = Math.min(g.x0, g.x1), x1 = Math.max(g.x0, g.x1);
+  const y0 = Math.min(g.y0, g.y1), y1 = Math.max(g.y0, g.y1);
+  switch (g.kind) {
+    case "rectangle":
+      seg(x0, y0, x1, y0); seg(x1, y0, x1, y1); seg(x1, y1, x0, y1); seg(x0, y1, x0, y0);
+      break;
+    case "ellipse": {
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      const rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
+      for (let i = 0; i < 48; i++) {
+        const t = (i / 48) * Math.PI * 2;
+        push(cx + rx * Math.cos(t), cy + ry * Math.sin(t));
+      }
+      break;
+    }
+    case "line":
+    case "arrow":
+      seg(g.x0, g.y0, g.x1, g.y1);
+      break;
+    case "polyline":
+    case "polygon": {
+      const pts = g.pts ?? [];
+      for (let i = 1; i < pts.length; i++) seg(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
+      if (g.kind === "polygon" && pts.length > 2) seg(pts[pts.length - 1][0], pts[pts.length - 1][1], pts[0][0], pts[0][1]);
+      break;
+    }
+    case "cloud":
+      seg(x0, y0, x1, y0); seg(x1, y0, x1, y1); seg(x1, y1, x0, y1); seg(x0, y1, x0, y0);
+      break;
+  }
+  return out;
+}
+
 export interface ReviewGeometry {
   rects: number[][]; // [x, y, w, h] in page units
   style: ReviewStyle;
@@ -76,7 +117,7 @@ export const DEFAULT_TOOL: ToolState = {
 
 /* ---------- in-memory store + undo/redo (per doc) ---------- */
 
-type Op =
+export type Op =
   | { kind: "add"; ann: Annotation }
   | { kind: "del"; ann: Annotation }
   | { kind: "upd"; before: Annotation; after: Annotation };
@@ -137,6 +178,32 @@ class AnnStore {
     this.emit();
   }
 
+  update(after: Annotation, record = true) {
+    const m = this.byDoc.get(after.docId);
+    const list = m?.get(after.page);
+    if (!list) return;
+    const idx = list.findIndex((a) => a.id === after.id);
+    if (idx < 0) return;
+    const before = { ...list[idx], geometry: JSON.parse(JSON.stringify(list[idx].geometry)) };
+    list[idx] = after;
+    list.sort((x, y) => x.z - y.z);
+    if (record) {
+      this.pushUndo(after.docId, { kind: "upd", before, after });
+      this.redoStacks.delete(after.docId);
+    }
+    this.emit();
+  }
+
+  getAnn(docId: string, id: string): Annotation | null {
+    const m = this.byDoc.get(docId);
+    if (!m) return null;
+    for (const list of m.values()) {
+      const a = list.find((x) => x.id === id);
+      if (a) return a;
+    }
+    return null;
+  }
+
   remove(ann: Annotation, record = true) {
     const m = this.byDoc.get(ann.docId);
     const list = m?.get(ann.page);
@@ -150,13 +217,25 @@ class AnnStore {
     this.emit();
   }
 
-  /** hit-test ink strokes: delete the topmost stroke within r of page-space point */
+  /** hit-test ink strokes AND shapes: delete the topmost within r of page-space point */
   eraseAt(docId: string, page: number, x: number, y: number, r: number): Annotation | null {
     const list = this.pageAnns(docId, page).filter(
-      (a) => a.type === "ink" || a.type === "highlighter",
+      (a) => a.type === "ink" || a.type === "highlighter" || a.type === "shape",
     );
     for (let i = list.length - 1; i >= 0; i--) {
       const ann = list[i];
+      if (ann.type === "shape") {
+        const pts = shapeStrokePoints(ann.geometry as ShapeGeometry);
+        for (const [px, py] of pts) {
+          const dx = px - x;
+          const dy = py - y;
+          if (dx * dx + dy * dy < r * r) {
+            this.remove(ann);
+            return ann;
+          }
+        }
+        continue;
+      }
       const pts = (ann.geometry as { points: number[][] }).points;
       for (const [px, py] of pts) {
         const dx = px - x;
@@ -210,11 +289,13 @@ class AnnStore {
   private apply(op: Op) {
     if (op.kind === "add") this.add(op.ann, false);
     else if (op.kind === "del") this.remove(op.ann, false);
+    else if (op.kind === "upd") this.update(op.after, false);
   }
 
   private applyInverse(op: Op) {
     if (op.kind === "add") this.remove(op.ann, false);
     else if (op.kind === "del") this.add(op.ann, false);
+    else if (op.kind === "upd") this.update(op.before, false);
   }
 }
 

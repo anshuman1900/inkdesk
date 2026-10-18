@@ -348,9 +348,9 @@ export default function Viewer({
     if (e.pointerType === "touch" && !touchWantsDraw) return; // let the browser pan/scroll
     if (!(isPen || isMouse || touchWantsDraw)) return;
 
-    // pen barrel button = eraser
+    // pen barrel button = eraser; drawing/erasing only when the Free-form pill is active
     const barrelErase = isPen && (e.buttons & 32) !== 0;
-    if (st.tool === "eraser" || barrelErase) {
+    if ((tool === "freeform" && st.tool === "eraser") || (tool === "freeform" && barrelErase)) {
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       erasingRef.current = true;
@@ -361,7 +361,7 @@ export default function Viewer({
       if (hit) void delAnn(hit.id).catch(() => {});
       return;
     }
-    if (!drawTool) {
+    if (!drawTool || tool !== "freeform") {
       // pan: any pointer pans when the pan tool is active, or touch when touch-pan mode
       if (tool === "pan" || (e.pointerType === "touch" && !touchDraw)) {
         e.preventDefault();
