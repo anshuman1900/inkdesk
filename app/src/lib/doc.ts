@@ -18,7 +18,8 @@ export async function openFileByPath(
     const [id, sizeStr] = res.split(":");
     const title = path.replace(/\\/g, "/").split("/").pop() ?? path;
     const meta: DocMeta = { id, path, title, sizeBytes: Number(sizeStr) || 0 };
-    await upsertRecents(meta);
+    // recents must never block opening a document
+    await upsertRecents(meta).catch((e) => console.warn("recents:", e));
     return { meta };
   } catch (e) {
     return { error: String(e) };
