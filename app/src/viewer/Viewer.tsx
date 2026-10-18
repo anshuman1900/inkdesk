@@ -5,14 +5,8 @@ import type { DocMeta } from "../screens/Home";
 import { Glyph, type GlyphName } from "../ui/kit";
 
 type ToolId =
-  | "pan"
-  | "select"
-  | "freeform"
-  | "shapes"
-  | "review"
-  | "measure"
-  | "insert"
-  | "library";
+  | "pan" | "select" | "freeform" | "shapes" | "review"
+  | "measure" | "insert" | "library";
 
 const TOOLBAR: { id: ToolId; label: string; glyph?: GlyphName }[] = [
   { id: "pan", label: "", glyph: "pan" },
@@ -57,9 +51,25 @@ const MAX_DPR = 1.5;
 
 export default function Viewer({
   meta,
+  tabs,
+  night,
+  layout,
+  onSelectTab,
+  onCloseTab,
+  onAddTab,
+  onToggleNight,
+  onOpenSettings,
   onBack,
 }: {
   meta: DocMeta;
+  tabs: DocMeta[];
+  night: boolean;
+  layout: "continuous" | "single";
+  onSelectTab: (id: string) => void;
+  onCloseTab: (id: string) => void;
+  onAddTab: () => void;
+  onToggleNight: () => void;
+  onOpenSettings: () => void;
   onBack: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -69,6 +79,7 @@ export default function Viewer({
   const pdfRef = useRef<PDFHandle | null>(null);
   const t0Ref = useRef<number>(performance.now());
   const fittedRef = useRef(false);
+  const historyRef = useRef<{ stack: number[]; idx: number }>({ stack: [1], idx: 0 });
 
   const [base, setBase] = useState<{ w: number; h: number } | null>(null);
   const [scale, setScale] = useState(1);
@@ -84,6 +95,8 @@ export default function Viewer({
     let cancelled = false;
     renderedRef.current.clear();
     renderJobsRef.current.clear();
+    fittedRef.current = false;
+    historyRef.current = { stack: [1], idx: 0 };
     (async () => {
       try {
         const handle = await openPdf(convertFileSrc(meta.id, "inkdesk"));
@@ -120,11 +133,18 @@ export default function Viewer({
     const doc = handle.doc;
     const pageH = base.h * scale;
     const pageW = base.w * scale;
-    const firstVisible = Math.floor(scroll.scrollTop / (pageH + PAGE_GAP)) + 1;
-    const visibleCount = Math.ceil(scroll.clientHeight / (pageH + PAGE_GAP)) + 1;
-    const lo = Math.max(1, firstVisible - 1);
-    const hi = Math.min(doc.numPages, firstVisible + visibleCount + 1);
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+
+    let lo: number;
+    let hi: number;
+    if (layout === "single") {
+      lo = hi = page;
+    } else {
+      const firstVisible = Math.floor(scroll.scrollTop / (pageH + PAGE_GAP)) + 1;
+      const visibleCount = Math.ceil(scroll.clientHeight / (pageH + PAGE_GAP)) + 1;
+      lo = Math.max(1, firstVisible - 1);
+      hi = Math.min(doc.numPages, firstVisible + visibleCount + 1);
+    }
 
     for (let n = lo; n <= hi; n++) {
       if (renderedRef.current.has(n) || renderJobsRef.current.has(n)) continue;
@@ -143,11 +163,10 @@ export default function Viewer({
         });
       renderJobsRef.current.set(n, job);
     }
-    // drop pages outside the window (keep the two canvases, they get reused)
     for (const n of [...renderedRef.current]) {
       if (n < lo - 2 || n > hi + 2) renderedRef.current.delete(n);
     }
-  }, [base, scale, firstPaint]);
+  }, [base, scale, firstPaint, layout, page]);
 
   useEffect(() => {
     renderedRef.current.clear();
@@ -160,11 +179,11 @@ export default function Viewer({
 
   const onScroll = useCallback(() => {
     const scroll = scrollRef.current;
-    if (!scroll || !base) return;
+    if (!scroll || !base || layout === "single") return;
     const pageH = base.h * scale + PAGE_GAP;
     setPage(Math.min(numPages, Math.floor(scroll.scrollTop / pageH) + 1));
     renderRange();
-  }, [base, scale, numPages, renderRange]);
+  }, [base, scale, numPages, layout, renderRange]);
 
   /* ---- zoom via ctrl+wheel ---- */
   useEffect(() => {
@@ -215,15 +234,35 @@ export default function Viewer({
     };
   }, [tool]);
 
-  const goToPage = (n: number) => {
+  const goToPage = (n: number, pushHistory = true) => {
     const scroll = scrollRef.current;
     if (!scroll || !base) return;
     const clamped = Math.min(Math.max(1, n), numPages);
-    scroll.scrollTop = (clamped - 1) * (base.h * scale + PAGE_GAP);
+    if (layout === "single") {
+      setPage(clamped);
+    } else {
+      scroll.scrollTop = (clamped - 1) * (base.h * scale + PAGE_GAP);
+    }
+    if (pushHistory) {
+      const h = historyRef.current;
+      h.stack = h.stack.slice(0, h.idx + 1);
+      h.stack.push(clamped);
+      h.idx = h.stack.length - 1;
+    }
+  };
+
+  const historyJump = (dir: -1 | 1) => {
+    const h = historyRef.current;
+    const next = h.idx + dir;
+    if (next < 0 || next >= h.stack.length) return;
+    h.idx = next;
+    goToPage(h.stack[next], false);
   };
 
   const pageW = base ? base.w * scale : 0;
   const pageH = base ? base.h * scale : 0;
+  const shownPages =
+    layout === "single" ? [page] : Array.from({ length: numPages }, (_, i) => i + 1);
 
   return (
     <div className="viewer">
@@ -232,17 +271,42 @@ export default function Viewer({
         <button className="tabbar__home" onClick={onBack} title="Home">
           <Glyph name="insert" size={16} />
         </button>
-        <div className="tab">
-          <span className="tab__dot" />
-          <span className="tab__name">{meta.title}</span>
-          <button className="tab__close" onClick={onBack} aria-label="close tab">
-            ×
+        <div className="tabs">
+          {tabs.map((t) => (
+            <div
+              key={t.id}
+              className={`tab ${t.id === meta.id ? "is-active" : ""}`}
+              onClick={() => onSelectTab(t.id)}
+            >
+              <span className="tab__dot" />
+              <span className="tab__name">{t.title}</span>
+              <button
+                className="tab__close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCloseTab(t.id);
+                }}
+                aria-label="close tab"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <button className="tabbar__plus" onClick={onAddTab} title="Open another document">
+            +
           </button>
         </div>
-        <button className="tabbar__plus" title="New tab — P5">
-          +
-        </button>
         <div className="tabbar__spacer" />
+        <button
+          className={`tabbar__icon ${night ? "is-active" : ""}`}
+          onClick={onToggleNight}
+          title="Night mode (M)"
+        >
+          {night ? "☀" : "☾"}
+        </button>
+        <button className="tabbar__icon" onClick={onOpenSettings} title="Settings">
+          <Glyph name="measure" size={15} />
+        </button>
         <span className="tabbar__meta">
           {numPages > 0 ? `${numPages} pages · ${(meta.sizeBytes / 1e6).toFixed(1)} MB` : "loading…"}
         </span>
@@ -265,7 +329,12 @@ export default function Viewer({
           ))}
           <div className="rail__spacer" />
           {RAIL_BOTTOM.map((r) => (
-            <button key={r.label} className="rail__btn" title={r.label}>
+            <button
+              key={r.label}
+              className="rail__btn"
+              title={r.label}
+              onClick={r.label === "Settings" ? onOpenSettings : undefined}
+            >
               <Glyph name={r.glyph} size={18} />
             </button>
           ))}
@@ -296,8 +365,8 @@ export default function Viewer({
             className={`canvas-scroll ${tool === "pan" ? "is-pan" : ""}`}
             onScroll={onScroll}
           >
-            <div className="pages" style={{ width: pageW || undefined }}>
-              {Array.from({ length: numPages }, (_, i) => i + 1).map((n) => (
+            <div className={`pages ${night ? "night" : ""}`} style={{ width: pageW || undefined }}>
+              {shownPages.map((n) => (
                 <div
                   key={n}
                   className="page-slot"
@@ -327,9 +396,15 @@ export default function Viewer({
             </button>
           </div>
 
-          {/* bottom-right: page nav + zoom */}
+          {/* bottom-right: nav history + page nav + zoom */}
           <div className="corner corner--br">
             <div className="page-chip">
+              <button onClick={() => historyJump(-1)} title="Back (page history)">
+                ↩
+              </button>
+              <button onClick={() => historyJump(1)} title="Forward (page history)">
+                ↪
+              </button>
               <button onClick={() => goToPage(page - 1)} aria-label="previous page">
                 ‹
               </button>

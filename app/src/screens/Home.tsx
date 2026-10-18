@@ -81,6 +81,16 @@ export default function Home({ onOpen }: { onOpen: (m: DocMeta) => void }) {
     return f ? byTab.filter((r) => r.title.toLowerCase().includes(f)) : byTab;
   }, [rows, filter, tab]);
 
+  const forget = async (row: Row) => {
+    try {
+      const db = await Database.load("sqlite:inkdesk.db");
+      await db.execute("DELETE FROM documents WHERE id = $1", [row.id]);
+      setRows((prev) => (prev ? prev.filter((r) => r.id !== row.id) : prev));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const fmtSize = (b: number) =>
     b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`;
 
@@ -142,7 +152,16 @@ export default function Home({ onOpen }: { onOpen: (m: DocMeta) => void }) {
                 {new Date(r.last_opened_at * 1000).toLocaleString()}
               </span>
               <span className="home__dim">{fmtSize(r.size_bytes)}</span>
-              <span className="home__dim">⋯</span>
+              <button
+                className="home__more"
+                title="Remove from list"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void forget(r);
+                }}
+              >
+                ⋯
+              </button>
             </button>
           ))}
         </div>
