@@ -352,13 +352,26 @@ export default function Viewer({
     const barrelErase = isPen && (e.buttons & 32) !== 0;
     if ((tool === "freeform" && st.tool === "eraser") || (tool === "freeform" && barrelErase)) {
       e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId);
       erasingRef.current = true;
       const rect = e.currentTarget.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / scale;
-      const y = (e.clientY - rect.top) / scale;
-      const hit = annStore.eraseAt(meta.id, n - 1, x, y, Math.max(8, st.width * 2.5));
-      if (hit) void delAnn(hit.id).catch(() => {});
+      const radius = Math.max(8, st.width * 2.5);
+      const eraseAt = (cx: number, cy: number) => {
+        const x = (cx - rect.left) / scale;
+        const y = (cy - rect.top) / scale;
+        const hit = annStore.eraseAt(meta.id, n - 1, x, y, radius);
+        if (hit) void delAnn(hit.id).catch(() => {});
+      };
+      eraseAt(e.clientX, e.clientY);
+      const move = (ev: PointerEvent) => eraseAt(ev.clientX, ev.clientY);
+      const up = () => {
+        erasingRef.current = false;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
       return;
     }
     if (!drawTool || tool !== "freeform") {
