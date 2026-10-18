@@ -624,3 +624,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .seg--light { border-color: #d3d8de; }
 .seg--light button { color: #64748b; }
 .seg--light button.is-active { background: #eef1f5; color: #1b2530; }
+
+.unit-select {
+  height: 30px; border-radius: 7px; border: 1px solid var(--chrome-border);
+  background: var(--chrome-raised); color: var(--text); font-size: 12px; padding: 0 8px;
+}

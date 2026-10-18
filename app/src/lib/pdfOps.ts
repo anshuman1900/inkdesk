@@ -1,7 +1,7 @@
 import { PDFDocument, rgb } from "pdf-lib";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { Annotation, ShapeGeometry, ReviewGeometry } from "./ink";
-import { annStore, strokePath2D, drawShape, drawTextReview } from "./ink";
+import { annStore, strokePath2D, drawShape, drawTextReview, uid } from "./ink";
 import { putAnn, delAnn } from "./annDb";
 import { drawObject, imageCache } from "./annRender";
 
@@ -225,4 +225,44 @@ export function textReviewExport(anns: Annotation[]): { txt: string; csv: string
 export function origDir(path: string): string {
   const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
   return i >= 0 ? path.slice(0, i) : ".";
+}
+
+/* ---------- P22: document builder (merge) ---------- */
+export async function mergeDocs(
+  sources: { docId: string; path: string }[],
+  outDir: string,
+): Promise<string> {
+  const out = await PDFDocument.create();
+  for (const src of sources) {
+    const bytes = await fetchDocBytes(src.docId);
+    const doc = await PDFDocument.load(bytes);
+    const pages = await out.copyPages(doc, doc.getPageIndices());
+    pages.forEach((p) => out.addPage(p));
+  }
+  const bytes = await out.save();
+  const path = `${outDir}\\merged ${Date.now() % 100000}.pdf`;
+  await writeBytes(path, bytes);
+  return path;
+}
+
+/** migrate annotations of a merged source doc into the merged doc with page offset */
+export async function migrateAnns(
+  sourceDocId: string,
+  newDocId: string,
+  pageOffset: number,
+): Promise<void> {
+  const { loadAnns } = await import("./annDb");
+  const anns = await loadAnns(sourceDocId);
+  for (const a of anns) {
+    const copy: Annotation = {
+      ...a,
+      id: uid(),
+      docId: newDocId,
+      page: a.page + pageOffset,
+      createdAt: Math.floor(Date.now() / 1000),
+      updatedAt: Math.floor(Date.now() / 1000),
+    };
+    annStore.add(copy, false);
+    await putAnn(copy).catch(() => {});
+  }
 }

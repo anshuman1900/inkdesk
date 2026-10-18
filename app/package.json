@@ -12,6 +12,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@tauri-apps/plugin-shell": "^2.5.0",
     "@tauri-apps/plugin-sql": "^2.4.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.4.299",

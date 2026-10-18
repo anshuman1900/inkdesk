@@ -108,7 +108,7 @@ export default function Viewer({
   const [shapeDash, setShapeDash] = useState(false);
   const shapeRef = useRef<{ x0: number; y0: number; x1: number; y1: number; pts: number[][] } | null>(null);
   const [reviewStyle, setReviewStyle] = useState<ReviewStyle>("highlight");
-  const [insertMode, setInsertMode] = useState<null | "textbox" | "note" | "callout" | "image" | "signature" | "audio">(null);
+  const [insertMode, setInsertMode] = useState<null | "textbox" | "note" | "callout" | "image" | "signature" | "audio" | "link" | "redact" | "redact-drag" | `stamp:${string}`>(null);
   const [editing, setEditing] = useState<{ page: number; x: number; y: number; cssW: number; value: string; kind: "textbox" | "note" | "callout"; tail?: [number, number] } | null>(null);
   const [sigOpen, setSigOpen] = useState(false);
   const [audioRec, setAudioRec] = useState<{ rec: MediaRecorder; chunks: Blob[]; x: number; y: number; page: number } | null>(null);
@@ -117,6 +117,12 @@ export default function Viewer({
   const selDragRef = useRef<{ startIds: string[]; x0: number; y0: number; lastDx?: number; lastDy?: number } | null>(null);
   const selShapeRef = useRef<{ x0: number; y0: number; x1: number; y1: number; pts: number[][] } | null>(null);
   const laserRef = useRef<{ pts: [number, number, number][]; raf: number } | null>(null);
+  const [measureKind, setMeasureKind] = useState<null | "length" | "polylength" | "rectarea" | "polyarea" | "calibrate">(null);
+  const [measureUnit, setMeasureUnit] = useState("cm");
+  const [measureFactor, setMeasureFactor] = useState(1); // page units per unit
+  const calibRef = useRef<{ pts: [number, number][] } | null>(null);
+  const measureRef = useRef<{ pts: number[][] } | null>(null);
+  const [stamps, setStamps] = useState<Annotation[]>([]);
   const [panel, setPanel] = useState<null | "pages" | "bookmarks" | "search" | "history">(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null);
@@ -193,6 +199,14 @@ export default function Viewer({
           [meta.id],
         ).catch(() => []);
         if (!cancelled) setBookmarks(bms);
+        const mset = await bmdb.select<{ value: string }[]>(
+          "SELECT value FROM app_settings WHERE key = 'measure'",
+        ).catch(() => []);
+        if (!cancelled && mset.length > 0) {
+          const parsed = JSON.parse(mset[0].value) as { unit: string; factor: number };
+          setMeasureUnit(parsed.unit);
+          setMeasureFactor(parsed.factor);
+        }
         const anns = await loadAnns(meta.id).catch(() => []);
         if (!cancelled) {
           annStore.loadDoc(meta.id, anns);
@@ -257,6 +271,49 @@ export default function Viewer({
         drawShape(ctx, ann.geometry as ShapeGeometry, ann.style, scale);
       } else if (ann.type === "text_review") {
         drawTextReview(ctx, ann.geometry as import("../lib/ink").ReviewGeometry, ann.style, scale);
+      } else if (ann.type === "redaction") {
+        const g = ann.geometry as { x: number; y: number; w: number; h: number };
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(g.x * scale, g.y * scale, g.w * scale, g.h * scale);
+      } else if (ann.type === "hyperlink") {
+        const g = ann.geometry as { x: number; y: number; w: number; h: number };
+        ctx.strokeStyle = "#2f6bff";
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = 1.2;
+        ctx.strokeRect(g.x * scale, g.y * scale, g.w * scale, g.h * scale);
+        ctx.setLineDash([]);
+      } else if (ann.type === "measurement") {
+        const g = ann.geometry as { pts: number[][]; kind: string };
+        const unit = (ann.data?.unit as string) ?? "cm";
+        const factor = (ann.data?.factor as number) ?? 1; // page units per 1 unit
+        ctx.strokeStyle = ann.style.color;
+        ctx.lineWidth = Math.max(1.2, ann.style.width * scale);
+        ctx.beginPath();
+        g.pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x * scale, y * scale) : ctx.lineTo(x * scale, y * scale)));
+        if (g.kind === "polyarea" || g.kind === "rectarea") ctx.closePath();
+        ctx.stroke();
+        // value label
+        let val = 0;
+        if (g.kind === "length" && g.pts.length >= 2) val = Math.hypot(g.pts[1][0] - g.pts[0][0], g.pts[1][1] - g.pts[0][1]);
+        else if (g.kind === "polylength") for (let i = 1; i < g.pts.length; i++) val += Math.hypot(g.pts[i][0] - g.pts[i - 1][0], g.pts[i][1] - g.pts[i - 1][1]);
+        else if (g.pts.length >= 3) {
+          let a2 = 0;
+          for (let i = 0; i < g.pts.length; i++) {
+            const [x1, y1] = g.pts[i];
+            const [x2, y2] = g.pts[(i + 1) % g.pts.length];
+            a2 += x1 * y2 - x2 * y1;
+          }
+          val = Math.abs(a2 / 2);
+        }
+        const label = `${(val / factor).toFixed(2)} ${unit}${g.kind.includes("area") ? "²" : ""}`;
+        const mx = g.pts[0][0] * scale;
+        const my = g.pts[0][1] * scale - 8;
+        ctx.font = `${11 * scale + 2}px 'Segoe UI', system-ui, sans-serif`;
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = "rgba(19,27,38,0.92)";
+        ctx.fillRect(mx - 4, my - 14, tw + 8, 18);
+        ctx.fillStyle = "#7fe3ff";
+        ctx.fillText(label, mx, my);
       } else {
         drawObject(ctx, ann, scale, imageCache);
       }
@@ -504,6 +561,44 @@ export default function Viewer({
         });
         return;
       }
+      if (insertMode === "link") {
+        const url = window.prompt("Link URL (https://…):", "https://");
+        if (url) {
+          const ann = mk({
+            type: "hyperlink",
+            geometry: { x, y, w: 160, h: 26 },
+            style: { color: "#2f6bff", width: 1.4, opacity: 1 },
+            data: { url },
+          });
+          annStore.add(ann);
+          void putAnn(ann).catch(() => {});
+        }
+        return;
+      }
+      if (insertMode === "redact") {
+        setInsertMode("redact-drag");
+        return;
+      }
+      if (insertMode && insertMode.startsWith("stamp:")) {
+        const stamp = stamps.find((st) => st.id === insertMode.slice(6));
+        if (stamp) {
+          const ann: Annotation = {
+            ...JSON.parse(JSON.stringify(stamp)),
+            id: uid(),
+            docId: meta.id,
+            page: n - 1,
+            geometry: JSON.parse(JSON.stringify(stamp.geometry)),
+            z: Date.now() % 1e9,
+            createdAt: now,
+            updatedAt: now,
+          };
+          const bb = ann.geometry as { x: number };
+          ann.geometry = { ...(ann.geometry as Record<string, unknown>), x: bb.x ?? x, y: (ann.geometry as { y: number }).y ?? y };
+          annStore.add(ann);
+          void putAnn(ann).catch(() => {});
+        }
+        return;
+      }
       if (insertMode === "image") {
         const inp = document.createElement("input");
         inp.type = "file";
@@ -579,9 +674,18 @@ export default function Viewer({
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         return;
       }
-      // click on any annotation → select it alone
+      // click on any annotation → select it alone; hyperlink + ctrl opens
       const hitAny = pageAnns.find((a) => pointInBBox(a, x, y, 6));
       if (hitAny) {
+        if (hitAny.type === "hyperlink" && e.ctrlKey && hitAny.data?.url) {
+          void (async () => {
+            const shell = await import("@tauri-apps/plugin-shell");
+            const openUrl = (shell as unknown as { open: (u: string) => Promise<void> }).open;
+            const u = hitAny.data ? String(hitAny.data.url) : "";
+            if (u) await openUrl(u).catch(() => {});
+          })();
+          return;
+        }
         setSelected(new Set([hitAny.id]));
         selDragRef.current = { startIds: [hitAny.id], x0: x, y0: y };
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -601,6 +705,68 @@ export default function Viewer({
       laserRef.current = { pts: [[e.clientX, e.clientY, performance.now()]], raf: 0 };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       void rect;
+      return;
+    }
+
+    // ---- measurement flows ----
+    if (tool === "measure" && measureKind) {
+      e.preventDefault();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+      if (measureKind === "calibrate") {
+        const c = calibRef.current ?? { pts: [] };
+        c.pts.push([x, y]);
+        calibRef.current = c;
+        if (c.pts.length === 2) {
+          const dist = Math.hypot(c.pts[1][0] - c.pts[0][0], c.pts[1][1] - c.pts[0][1]);
+          const known = window.prompt(`Distance between those points, in ${measureUnit}:`, "10");
+          const knownN = Number(known);
+          if (knownN > 0) {
+            const factor = dist / knownN;
+            setMeasureFactor(factor);
+            void Database.load("sqlite:inkdesk.db").then((db) =>
+              db.execute(
+                `INSERT INTO app_settings (key, value) VALUES ('measure', $1)
+                 ON CONFLICT(key) DO UPDATE SET value = $1`,
+                [JSON.stringify({ unit: measureUnit, factor })],
+              ),
+            ).catch(() => {});
+          }
+          calibRef.current = null;
+        }
+        return;
+      }
+      // click-to-add measurement points; double-click finishes
+      const m = measureRef.current ?? { pts: [] };
+      m.pts.push([x, y]);
+      measureRef.current = m;
+      const finish = (pts: number[][]) => {
+        measureRef.current = null;
+        if (pts.length < 2) return;
+        const now = Math.floor(Date.now() / 1000);
+        const ann: Annotation = {
+          id: uid(),
+          docId: meta.id,
+          page: n - 1,
+          type: "measurement",
+          geometry: { pts, kind: measureKind },
+          style: { color: "#7fe3ff", width: 1.6, opacity: 1 },
+          data: { unit: measureUnit, factor: measureFactor },
+          z: Date.now() % 1e9,
+          createdAt: now,
+          updatedAt: now,
+        };
+        annStore.add(ann);
+        void putAnn(ann).catch(() => {});
+      };
+      if (measureKind === "length") {
+        if (m.pts.length === 2) finish(m.pts);
+      } else if (measureKind === "rectarea") {
+        if (m.pts.length === 2) finish([m.pts[0], [m.pts[1][0], m.pts[0][1]], m.pts[1], [m.pts[0][0], m.pts[1][1]]]);
+      } else if (e.detail === 2) {
+        finish(m.pts);
+      }
       return;
     }
 
@@ -675,7 +841,7 @@ export default function Viewer({
       const rect = e.currentTarget.getBoundingClientRect();
       shp.x1 = (e.clientX - rect.left) / scale;
       shp.y1 = (e.clientY - rect.top) / scale;
-      shp.pts.push([shp.x1, shp.y1]);
+      if (insertMode === "redact-drag") shp.pts = [[shp.x1, shp.y1]];
       scheduleWet();
       return;
     }
@@ -758,6 +924,23 @@ export default function Viewer({
       const wctx = wet?.getContext("2d");
       if (wctx && wet) wctx.clearRect(0, 0, wet.width, wet.height);
       const st = toolRef.current;
+      if (insertMode === "redact-drag") {
+        setInsertMode(null);
+        const ann: Annotation = {
+          id: uid(),
+          docId: meta.id,
+          page: n - 1,
+          type: "redaction",
+          geometry: { x: Math.min(shp.x0, shp.x1), y: Math.min(shp.y0, shp.y1), w: Math.abs(shp.x1 - shp.x0), h: Math.abs(shp.y1 - shp.y0) },
+          style: { color: "#0d131c", width: 1, opacity: 1 },
+          z: Date.now() % 1e9,
+          createdAt: Math.floor(Date.now() / 1000),
+          updatedAt: Math.floor(Date.now() / 1000),
+        };
+        annStore.add(ann);
+        void putAnn(ann).catch(() => {});
+        return;
+      }
       const ann: Annotation = {
         id: uid(),
         docId: meta.id,
@@ -1264,6 +1447,26 @@ export default function Viewer({
             </div>
           )}
 
+          {/* Measure expanded subrow */}
+          {tool === "measure" && (
+            <div className="subrow under-toolbar">
+              <SubTool glyph="measure" label={`Calibrate (${measureUnit})`} active={measureKind === "calibrate"} onClickOverride={() => setMeasureKind("calibrate")} />
+              <SubTool glyph="line" label="Length" active={measureKind === "length"} onClickOverride={() => setMeasureKind("length")} />
+              <SubTool glyph="polyline" label="PolyLength" active={measureKind === "polylength"} onClickOverride={() => setMeasureKind("polylength")} />
+              <SubTool glyph="rectangle" label="Rect area" active={measureKind === "rectarea"} onClickOverride={() => setMeasureKind("rectarea")} />
+              <SubTool glyph="polygon" label="Poly area" active={measureKind === "polyarea"} onClickOverride={() => setMeasureKind("polyarea")} />
+              <select
+                className="unit-select"
+                value={measureUnit}
+                onChange={(e) => setMeasureUnit(e.target.value)}
+                title="measurement unit"
+              >
+                {["cm", "mm", "in", "ft", "pt"].map((u) => <option key={u}>{u}</option>)}
+              </select>
+              <span className="subrow__hint">{measureKind === "calibrate" ? "click two points of a known length" : measureKind ? "click points · double-click to finish" : "calibrate first"}</span>
+            </div>
+          )}
+
           {/* Insert expanded subrow */}
           {tool === "insert" && (
             <div className="subrow under-toolbar">
@@ -1272,9 +1475,24 @@ export default function Viewer({
               <SubTool glyph="callout" label="Callout" active={insertMode === "callout"} onClickOverride={() => setInsertMode("callout")} />
               <SubTool glyph="image" label="Image" active={insertMode === "image"} onClickOverride={() => setInsertMode("image")} />
               <SubTool glyph="flourish" label="Signature" active={insertMode === "signature"} onClickOverride={() => setInsertMode("signature")} />
+              <SubTool glyph="link" label="Link" active={insertMode === "link"} onClickOverride={() => setInsertMode("link")} />
+              <SubTool glyph="t_redact" label="Redact" active={insertMode === "redact"} onClickOverride={() => setInsertMode("redact")} />
               <SubTool glyph="speaker" label={audioRec ? "Stop ●" : "Audio note"} active={!!audioRec} onClickOverride={() => setInsertMode("audio")} />
+              {stamps.length > 0 && (
+                <>
+                  <span className="subrow__divider" />
+                  {stamps.map((st) => (
+                    <button key={st.id} className="flyout__chip" style={{ background: "#3fc1c9", color: "#0d131c", width: 30, height: 30 }}
+                      title="place stamp"
+                      onClick={() => setInsertMode(("stamp:" + st.id) as never)}
+                    >
+                      <Glyph name="shapes" size={14} />
+                    </button>
+                  ))}
+                </>
+              )}
               <span className="subrow__hint">
-                {insertMode ? "click on the page to place" : "pick an insert tool"}
+                {selected.size > 0 ? "selection: use Select→Back/Fwd to save" : insertMode ? "click on the page to place" : "pick an insert tool"}
               </span>
             </div>
           )}
@@ -1290,6 +1508,12 @@ export default function Viewer({
               <SubTool glyph="shapes" label={"Fwd"} onClickOverride={() => reorderSelected(1)} title="Bring forward" />
               <SubTool glyph="pen2" label={"Back"} onClickOverride={() => reorderSelected(-1)} title="Send backward" />
               <SubTool glyph="eraser" label={`Delete (${selected.size})`} onClickOverride={deleteSelected} />
+              <SubTool glyph="pro" label="Save stamp" onClickOverride={() => {
+                const anns2 = [...selected].map((id) => annStore.getAnn(meta.id, id)).filter(Boolean) as Annotation[];
+                if (anns2.length === 0) return;
+                setStamps((prev) => [...prev, ...anns2].slice(-8));
+                setSelected(new Set());
+              }} />
             </div>
           )}
 
