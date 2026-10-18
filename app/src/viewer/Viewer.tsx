@@ -95,6 +95,7 @@ export default function Viewer({
   toolRef.current = toolState;
   const strokeRef = useRef<{ pts: number[][]; dirty: boolean; isPen: boolean } | null>(null);
   const panRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
+  const erasingRef = useRef(false);
   const rafRef = useRef(0);
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
   const [shapeDash, setShapeDash] = useState(false);
@@ -351,10 +352,12 @@ export default function Viewer({
     const barrelErase = isPen && (e.buttons & 32) !== 0;
     if (st.tool === "eraser" || barrelErase) {
       e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      erasingRef.current = true;
       const rect = e.currentTarget.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
       const y = (e.clientY - rect.top) / scale;
-      const hit = annStore.eraseAt(meta.id, n - 1, x, y, Math.max(6, st.width * 2.2));
+      const hit = annStore.eraseAt(meta.id, n - 1, x, y, Math.max(8, st.width * 2.5));
       if (hit) void delAnn(hit.id).catch(() => {});
       return;
     }
@@ -425,6 +428,7 @@ export default function Viewer({
   };
 
   const onOverlayPointerUp = (e: React.PointerEvent<HTMLDivElement>, n: number) => {
+    erasingRef.current = false;
     if (e.pointerType === "touch" && panRef.current) {
       panRef.current = null;
       return;
@@ -771,9 +775,12 @@ export default function Viewer({
           {/* free-form expanded subrow (colors + widths + eraser) */}
           {tool === "freeform" && (
             <div className="subrow under-toolbar">
-              <SubTool glyph="pen" label="" active={toolState.tool === "pen"} />
-              <SubTool glyph="highlighter" label="" active={toolState.tool === "highlighter"} />
-              <SubTool glyph="eraser" label="" active={toolState.tool === "eraser"} />
+              <SubTool glyph="pen" label="" active={toolState.tool === "pen"}
+                onClickOverride={() => setToolState({ ...toolState, tool: "pen" })} />
+              <SubTool glyph="highlighter" label="" active={toolState.tool === "highlighter"}
+                onClickOverride={() => setToolState({ ...toolState, tool: "highlighter" })} />
+              <SubTool glyph="eraser" label="" active={toolState.tool === "eraser"}
+                onClickOverride={() => setToolState({ ...toolState, tool: "eraser" })} />
               {INK_COLORS.map((c) => (
                 <ColorChip key={c} color={c} selected={toolState.color === c}
                   onClickOverride={() => setToolState({ ...toolState, color: c })} />

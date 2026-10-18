@@ -25,6 +25,7 @@ export interface Annotation {
   type: AnnType;
   geometry: unknown; // per-type
   style: InkStyle & Record<string, unknown>;
+  data?: Record<string, unknown>; // text, src, audio, fontSize...
   z: number;
   createdAt: number;
   updatedAt: number;

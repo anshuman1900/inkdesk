@@ -7,6 +7,7 @@ interface Row {
   type: string;
   geometry: string;
   style: string;
+  data: string | null;
   z_order: number;
   created_at: number;
   updated_at: number;
@@ -20,6 +21,7 @@ function toAnn(docId: string, r: Row): Annotation {
     type: r.type as Annotation["type"],
     geometry: JSON.parse(r.geometry),
     style: JSON.parse(r.style),
+    data: r.data ? JSON.parse(r.data) : undefined,
     z: r.z_order,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -29,7 +31,7 @@ function toAnn(docId: string, r: Row): Annotation {
 export async function loadAnns(docId: string): Promise<Annotation[]> {
   const db = await Database.load("sqlite:inkdesk.db");
   const rows = await db.select<Row[]>(
-    "SELECT id, page_index, type, geometry, style, z_order, created_at, updated_at FROM annotations WHERE document_id = $1 ORDER BY page_index, z_order",
+    "SELECT id, page_index, type, geometry, style, data, z_order, created_at, updated_at FROM annotations WHERE document_id = $1 ORDER BY page_index, z_order",
     [docId],
   );
   return rows.map((r) => toAnn(docId, r));
@@ -38,10 +40,10 @@ export async function loadAnns(docId: string): Promise<Annotation[]> {
 export async function putAnn(a: Annotation): Promise<void> {
   const db = await Database.load("sqlite:inkdesk.db");
   await db.execute(
-    `INSERT INTO annotations (id, document_id, page_index, type, geometry, style, z_order, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO annotations (id, document_id, page_index, type, geometry, style, data, z_order, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT(id) DO UPDATE SET
-       geometry = $5, style = $6, z_order = $7, updated_at = $9`,
+       geometry = $5, style = $6, data = $7, z_order = $8, updated_at = $10`,
     [
       a.id,
       a.docId,
@@ -49,6 +51,7 @@ export async function putAnn(a: Annotation): Promise<void> {
       a.type,
       JSON.stringify(a.geometry),
       JSON.stringify(a.style),
+      a.data ? JSON.stringify(a.data) : null,
       a.z,
       a.createdAt,
       a.updatedAt,
