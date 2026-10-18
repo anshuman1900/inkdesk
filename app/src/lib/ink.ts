@@ -237,7 +237,7 @@ export function strokePath2D(
   simulatePressure = true,
 ): Path2D {
   const outline = getStroke(points, {
-    size: style.width * scale,
+    size: style.width,   // page units — coords get scaled after, keeping true width
     thinning: isHighlighter ? 0 : 0.55,
     smoothing: 0.6,
     streamline: 0.34,   // responsive for fast pen writing
@@ -251,11 +251,15 @@ export function strokePath2D(
     path.arc(x * scale, y * scale, Math.max(0.6, (style.width * scale) / 2), 0, Math.PI * 2);
     return path;
   }
-  path.moveTo(outline[0][0], outline[0][1]);
+  // outline is in page units — scale to CSS px so ink lands exactly under the cursor
+  path.moveTo(outline[0][0] * scale, outline[0][1] * scale);
   for (let i = 1; i < outline.length; i++) {
     const [x0, y0] = outline[i];
     const [x1, y1] = outline[i + 1] ?? outline[i];
-    path.quadraticCurveTo(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+    path.quadraticCurveTo(
+      x0 * scale, y0 * scale,
+      ((x0 + x1) / 2) * scale, ((y0 + y1) / 2) * scale,
+    );
   }
   path.closePath();
   return path;
