@@ -1,12 +1,16 @@
 import {
   CategoryChip,
+  ColorChip,
   FavBar,
   Panel,
   RadialMenu,
   Slider,
+  SubRow,
+  SubTool,
   Swatches,
   Toggle,
   ToolButton,
+  WidthPreview,
 } from "../ui/kit";
 
 export default function KitPage() {
@@ -68,6 +72,63 @@ export default function KitPage() {
             <Toggle label="Stylus draws, touch pans" on />
             <Toggle label="Use radial menu" />
           </div>
+        </Panel>
+
+        <Panel title="Expanded rows — Review (live-app match)">
+          <SubRow>
+            <SubTool glyph="text" label="Text" active />
+            <SubTool glyph="callout" label="Callout" />
+            <SubTool glyph="t_highlight" label="Text Highlight" />
+            <SubTool glyph="t_underline" label="Underline" />
+            <SubTool glyph="t_squiggle" label="Squiggle" />
+            <SubTool glyph="t_strike" label="Strike-through" />
+            <SubTool glyph="t_cleaner" label="Text Cleaner" />
+            <SubTool glyph="t_redact" label="Redaction" />
+          </SubRow>
+        </Panel>
+
+        <Panel title="Expanded rows — Shapes">
+          <SubRow>
+            <SubTool glyph="rectangle" label="Rectangle" active />
+            <SubTool glyph="ellipse" label="Ellipse" />
+            <SubTool glyph="line" label="Line" />
+            <SubTool glyph="arrow" label="Arrow" />
+            <SubTool glyph="polyline" label="Polyline" />
+            <SubTool glyph="polygon" label="Polygon" />
+            <SubTool glyph="cloud" label="Cloud" />
+          </SubRow>
+        </Panel>
+
+        <Panel title="Expanded rows — Insert">
+          <SubRow>
+            <SubTool glyph="sticky" label="Note" active />
+            <SubTool glyph="bookmark" label="Bookmark" />
+            <SubTool glyph="camera" label="Image from Camera" />
+            <SubTool glyph="image" label="Image from File" />
+            <SubTool glyph="link" label="Hyperlink" />
+            <SubTool glyph="speaker" label="Audio note" />
+            <SubTool glyph="equation" label="Equation" />
+            <SubTool glyph="snapshot" label="Snapshot" />
+            <SubTool glyph="flourish" label="Signature" />
+          </SubRow>
+        </Panel>
+
+        <Panel title="Expanded rows — Free-form properties">
+          <SubRow>
+            <button className="color-chip is-selected" style={{ background: "var(--cat-draw)" }} aria-label="ink color" />
+            <SubTool glyph="highlighter" label="" />
+            <SubTool glyph="clip" label="" />
+            <SubTool glyph="scribble" label="" />
+            <ColorChip color="#ff6b6b" />
+            <ColorChip color="#4f8cff" />
+            <ColorChip color="#1e1f24" />
+            <WidthPreview width={1.4} label="" />
+            <WidthPreview width={4.5} label="" />
+            <button className="width-chip" style={{ background: "var(--cat-draw)" }}>
+              2 ▾
+            </button>
+            <SubTool glyph="more" label="" />
+          </SubRow>
         </Panel>
 
         <Panel title="States">

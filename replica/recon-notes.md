@@ -25,6 +25,20 @@ Source: replica/screens/anshu-run/ (local only, never committed). Drawboard PDF 
 - Bottom-right: "< [1] of 12 >" page chip + grid/thumbnails button; below: "− 52% +" zoom row + expand icon
 - Clone notes: no Upload/Share/Upgrade pills (R1/R6) — replace right side with search + doc actions (save/flatten/print per S11)
 
+## Expanded toolbar rows (Oct 18 closeups — toolbar-*-expanded.png)
+
+Two-tier pattern: top tier = category pills (icon+label; active pill = raised bg + 1px border);
+bottom tier = expanded subtool row (dark, icon+label buttons, active boxed, **X dismisses on right**).
+
+- **Free-form row:** ink color fan (pie showing current color), highlighter, paperclip, lasso-scribble tool, solid color chips (red/blue/black circles), stroke-width previews (thin ~ / thick ~ wavy lines), numeric width chip "2 ▾" (colored), "…", X
+- **Aa Review row:** Text, Callout, Text Highlight, Underline, Squiggle, Strike-through, Text Cleaner, Redaction — each T-styled icon; **yellow dot badge = Pro gate** (clone drops badges — all free)
+- **Shapes row:** Rectangle (active boxed), Ellipse, Line, Arrow, Polyline, Polygon, Cloud + X
+- **Insert row:** Note, Bookmark, Image from Camera, Image from File, Hyperlink, Audio note•, Equation•, Snapshot•, Signature• (• = Pro dot) + X
+
+New tools spotted (not in original recon): **Text Cleaner** (removes text-review marks), **Equation** (LaTeX insert), **Image from Camera**, **Bookmark** as an insert tool. → added to features.csv.
+
+Anatomy constants: category pill h≈34px, subtool row h≈44px, chip ⌀≈22px, icons stroke≈1.8px white, subtool label 12.5px, active subtool = boxed (raised bg + border).
+
 ## Tool colors observed (flyout chips)
 blue pen, yellow highlighter, white eraser, blue shapes, purple text "T", note bubble — maps to our category accents (draw/amber, insert/green, measure/teal, select/blue, pro/purple)
 

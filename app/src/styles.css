@@ -329,6 +329,61 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .btn--danger { background: transparent; border-color: var(--danger); color: var(--danger); }
 .btn:hover { filter: brightness(1.1); }
 
+/* ============ two-tier subtool rows (P2.1 — from live-app closeups) ============ */
+
+.subrow {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--chrome); border: 1px solid var(--chrome-border);
+  border-radius: 10px; padding: 5px 8px;
+}
+
+.subrow__items {
+  display: flex; align-items: center; gap: 2px; flex: 1;
+  flex-wrap: wrap;
+}
+
+.subrow__close {
+  border: 0; background: transparent; color: var(--text-muted);
+  font-size: 15px; cursor: pointer; padding: 4px 7px; border-radius: 6px;
+  margin-left: 4px;
+}
+
+.subrow__close:hover { background: var(--chrome-active); color: var(--text); }
+
+.subtool {
+  display: inline-flex; align-items: center; gap: 7px; height: 32px;
+  padding: 0 10px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: var(--text); font-size: 12.5px; cursor: pointer;
+}
+
+.subtool:hover { background: var(--chrome-raised); }
+
+.subtool.is-active {
+  background: var(--chrome-active); border-color: var(--text-faint);
+}
+
+.color-chip {
+  width: 22px; height: 22px; border-radius: 6px; border: 2px solid transparent;
+  cursor: pointer; padding: 0; flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.color-chip.is-selected { border-color: var(--text); }
+
+.width-preview {
+  display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 8px;
+  border-radius: 8px; border: 1px solid transparent; background: transparent;
+  color: var(--text); cursor: pointer; font-size: 11px;
+}
+
+.width-preview:hover { background: var(--chrome-raised); }
+.width-preview.is-selected { background: var(--chrome-active); border-color: var(--text-faint); }
+
+.width-chip {
+  height: 28px; min-width: 42px; border-radius: 7px; border: 0;
+  color: var(--tool-ink); font-size: 12px; font-weight: 700; cursor: pointer; padding: 0 9px;
+}
+
 .titlebar {
   display: flex; align-items: center; gap: 10px; padding: 10px 14px;
   background: var(--chrome); border-bottom: 1px solid var(--chrome-border);

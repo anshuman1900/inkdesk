@@ -61,3 +61,6 @@ Drawboard AI,ai,skip,Pro,no,Their service
 Office (Word) to PDF conversion,convert,skip,Pro Lite,no,Local converter possible later
 Surface Dial integration,hardware,could,Pro,no,Generic Windows radial API possible
 Web/iOS/Android versions,platform,skip,Pro,no,Desktop only per scope
+Text Cleaner (remove text-review marks),draw,should,Free,no,Spotted in Review row closeup; removes highlight/underline/squiggly from text
+Equation insert (LaTeX),insert,could,Pro,no,"π icon, Pro-dot in original; free here (R1) — render via MathML/KaTeX subset"
+Image from Camera,insert,skip,Free,no,No camera workflow on desktop — file picker covers it

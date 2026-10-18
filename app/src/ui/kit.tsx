@@ -3,18 +3,13 @@ import type { CSSProperties, ReactNode } from "react";
 /* ---------- inline glyphs (original, simple geometric set) ---------- */
 
 export type GlyphName =
-  | "pan"
-  | "select"
-  | "pen"
-  | "pen2"
-  | "highlighter"
-  | "eraser"
-  | "textreview"
-  | "shapes"
-  | "insert"
-  | "measure"
-  | "pro"
-  | "more";
+  | "pan" | "select" | "pen" | "pen2" | "highlighter" | "eraser" | "textreview"
+  | "shapes" | "insert" | "measure" | "pro" | "more"
+  | "text" | "callout" | "t_highlight" | "t_underline" | "t_squiggle"
+  | "t_strike" | "t_cleaner" | "t_redact"
+  | "rectangle" | "ellipse" | "line" | "arrow" | "polyline" | "polygon" | "cloud"
+  | "sticky" | "bookmark" | "camera" | "image" | "link" | "speaker"
+  | "equation" | "snapshot" | "flourish" | "pie" | "clip" | "scribble";
 
 const PATHS: Record<GlyphName, ReactNode> = {
   pan: (
@@ -85,7 +80,122 @@ const PATHS: Record<GlyphName, ReactNode> = {
       <circle cx="18" cy="12" r="1.4" />
     </>
   ),
-};
+  text: (
+    <>
+      <rect x="3.5" y="3.5" width="17" height="17" rx="2" />
+      <path d="M8 8h8M12 8v9" />
+    </>
+  ),
+  callout: <path d="M4.5 5h15a1 1 0 011 1v9a1 1 0 01-1 1h-8l-4.5 4v-4h-2.5a1 1 0 01-1-1V6a1 1 0 011-1z" />,
+  t_highlight: (
+    <>
+      <path d="M6 6h12M12 6v9" />
+      <path d="M6 19.5h12" strokeWidth="3.2" />
+    </>
+  ),
+  t_underline: (
+    <>
+      <path d="M6 6h12M12 6v10" />
+      <path d="M8 19.5h8" />
+    </>
+  ),
+  t_squiggle: (
+    <>
+      <path d="M6 6h12M12 6v10" />
+      <path d="M6 19.5q1.5-2 3 0t3 0 3 0 3 0" />
+    </>
+  ),
+  t_strike: (
+    <>
+      <path d="M6 6h12M12 6v10" />
+      <path d="M7 12.5h10" />
+    </>
+  ),
+  t_cleaner: (
+    <>
+      <path d="M5 5h12M11 5v9" />
+      <path d="M15.5 14.5l5 5M20.5 14.5l-5 5" />
+    </>
+  ),
+  t_redact: (
+    <>
+      <path d="M6 4h12M12 4v5" />
+      <rect x="6" y="11" width="12" height="7" fill="currentColor" stroke="none" rx="0.5" />
+    </>
+  ),
+  rectangle: <rect x="4" y="5.5" width="16" height="13" rx="1.2" />,
+  ellipse: <circle cx="12" cy="12" r="7.5" />,
+  line: <path d="M4.5 19L19.5 5" />,
+  arrow: (
+    <>
+      <path d="M4.5 19L19.5 5" />
+      <path d="M12.5 5h7v7" />
+    </>
+  ),
+  polyline: <path d="M3.5 17l5.5-6.5 4 3.5 7.5-9" />,
+  polygon: <path d="M12 3.5l7 4v9l-7 4-7-4v-9z" />,
+  cloud: <path d="M7 17a4 4 0 01-.4-7.98A5.5 5.5 0 0117.3 8.7 3.8 3.8 0 0116.8 17H7z" />,
+  sticky: (
+    <>
+      <path d="M5 4.5h14v10.5l-4.5 4.5H5z" />
+      <path d="M14.5 19.5V15H19" />
+    </>
+  ),
+  bookmark: <path d="M7 4h10v16l-5-4-5 4z" />,
+  camera: (
+    <>
+      <rect x="3" y="7" width="18" height="13" rx="2" />
+      <circle cx="12" cy="13" r="3.4" />
+      <path d="M8.5 7l1.4-2.3h4.2L15.5 7" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.4" />
+      <path d="M6 17.5l4.5-4.5 3 3 4.5-4.5" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M9.5 14.5l5-5" />
+      <path d="M8.5 11.5L6 14a3.2 3.2 0 004.5 4.5l2.5-2.5" />
+      <path d="M15.5 12.5L18 10a3.2 3.2 0 00-4.5-4.5L11 8" />
+    </>
+  ),
+  speaker: (
+    <>
+      <path d="M4 10v4h3l5 4V6l-5 4z" />
+      <path d="M15.5 9.5a3.6 3.6 0 010 5" />
+    </>
+  ),
+  equation: (
+    <>
+      <path d="M5 7.5h14" />
+      <path d="M9 7.5V18M15.5 7.5c0 4-1.5 8.5-4 10.5" />
+    </>
+  ),
+  snapshot: (
+    <>
+      <path d="M7 3v14h14" />
+      <path d="M3 7h14v14" />
+    </>
+  ),
+  flourish: <path d="M4 17c2-6.5 4.2-6.5 5.2-2s3.2 4 5.3-1 3.5-4.5 6.5-2.5" />,
+  pie: (
+    <>
+      <path d="M12 12V4a8 8 0 018 8z" />
+      <path d="M12 12h8" />
+    </>
+  ),
+  clip: <path d="M8.5 12l6-6a3 3 0 014.2 4.2l-8 8a4.6 4.6 0 01-6.5-6.5l7-7" />,
+  scribble: (
+    <>
+      <circle cx="12" cy="9.5" r="5" />
+      <path d="M9 13.5c-2.2 2.8-1.4 5.8 1.6 6.8" />
+    </>
+  ),
+};;
 
 export function Glyph({ name, size = 20 }: { name: GlyphName; size?: number }) {
   return (
@@ -281,5 +391,76 @@ export function FavBar() {
         +
       </button>
     </div>
+  );
+}
+
+/* ---------- two-tier toolbar subrows (from live-app closeups) ---------- */
+
+export function SubRow({ children }: { children: ReactNode }) {
+  return (
+    <div className="subrow">
+      <div className="subrow__items">{children}</div>
+      <button className="subrow__close" aria-label="close row">
+        ×
+      </button>
+    </div>
+  );
+}
+
+export function SubTool({
+  glyph,
+  label,
+  active = false,
+}: {
+  glyph: GlyphName;
+  label: string;
+  active?: boolean;
+}) {
+  return (
+    <button className={`subtool ${active ? "is-active" : ""}`}>
+      <Glyph name={glyph} size={17} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+export function ColorChip({
+  color,
+  selected = false,
+}: {
+  color: string;
+  selected?: boolean;
+}) {
+  return (
+    <button
+      className={`color-chip ${selected ? "is-selected" : ""}`}
+      style={{ background: color } as CSSProperties}
+      aria-label={`color ${color}`}
+    />
+  );
+}
+
+export function WidthPreview({
+  width,
+  label,
+  selected = false,
+}: {
+  width: number;
+  label: string;
+  selected?: boolean;
+}) {
+  return (
+    <button className={`width-preview ${selected ? "is-selected" : ""}`}>
+      <svg width="26" height="12" viewBox="0 0 26 12" aria-hidden>
+        <path
+          d="M1 6q3-5 6.5 0t6.5 0 6.5 0 4.5 0"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={width}
+          strokeLinecap="round"
+        />
+      </svg>
+      <span>{label}</span>
+    </button>
   );
 }
