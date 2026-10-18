@@ -436,8 +436,6 @@ export default function Viewer({
     }
     if (!cur) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const isPen = e.pointerType === "pen" && e.pressure > 0;
-    const pressure = isPen ? e.pressure : e.pointerType === "mouse" ? 0.5 : 0.5;
     const events = typeof e.nativeEvent.getCoalescedEvents === "function"
       ? e.nativeEvent.getCoalescedEvents()
       : [];
