@@ -116,9 +116,9 @@ export default function Viewer({
   const [audioRec, setAudioRec] = useState<{ rec: MediaRecorder; chunks: Blob[]; x: number; y: number; page: number } | null>(null);
   const [selectMode, setSelectMode] = useState<"rect" | "lasso">("rect");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const selDragRef = useRef<{ startIds: string[]; x0: number; y0: number; lastDx?: number; lastDy?: number } | null>(null);
+  const selDragRef = useRef<{ startIds: string[]; x0: number; y0: number; lastDx?: number; lastDy?: number; pendingX?: number; pendingY?: number; raf?: number; baseRect?: DOMRect } | null>(null);
   const selShapeRef = useRef<{ x0: number; y0: number; x1: number; y1: number; pts: number[][] } | null>(null);
-  const laserRef = useRef<{ pts: [number, number, number][]; raf: number } | null>(null);
+  const laserRef = useRef<{ pts: [number, number, number][]; raf: number; page?: number } | null>(null);
   const [measureKind, setMeasureKind] = useState<null | "length" | "polylength" | "rectarea" | "polyarea" | "calibrate">(null);
   const [measureUnit, setMeasureUnit] = useState("cm");
   const [measureFactor, setMeasureFactor] = useState(1); // page units per unit
@@ -606,6 +606,17 @@ export default function Viewer({
     if (e.pointerType === "touch" && !touchWantsDraw) return; // let the browser pan/scroll
     if (!(isPen || isMouse || touchWantsDraw)) return;
 
+    // ---- redact-drag: second click starts the box ----
+    if (tool === "insert" && insertMode === "redact-drag") {
+      e.preventDefault();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+      shapeRef.current = { x0: x, y0: y, x1: x, y1: y, pts: [[x, y]] };
+      scheduleWet();
+      return;
+    }
+
     // ---- insert placement ----
     if (tool === "insert" && insertMode) {
       e.preventDefault();
@@ -740,7 +751,7 @@ export default function Viewer({
       const pageAnns = annStore.pageAnns(meta.id, n - 1);
       const hitSelected = pageAnns.find((a) => selected.has(a.id) && pointInBBox(a, x, y, 8));
       if (hitSelected && selected.size > 0) {
-        selDragRef.current = { startIds: [...selected], x0: x, y0: y };
+        selDragRef.current = { startIds: [...selected], x0: x, y0: y, baseRect: e.currentTarget.getBoundingClientRect() };
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         return;
       }
@@ -757,7 +768,7 @@ export default function Viewer({
           return;
         }
         setSelected(new Set([hitAny.id]));
-        selDragRef.current = { startIds: [hitAny.id], x0: x, y0: y };
+        selDragRef.current = { startIds: [hitAny.id], x0: x, y0: y, baseRect: e.currentTarget.getBoundingClientRect() };
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         return;
       }
@@ -771,10 +782,8 @@ export default function Viewer({
     // ---- laser ----
     if (tool === "laser") {
       e.preventDefault();
-      const rect = e.currentTarget.getBoundingClientRect();
-      laserRef.current = { pts: [[e.clientX, e.clientY, performance.now()]], raf: 0 };
+      laserRef.current = { pts: [[e.clientX, e.clientY, performance.now()]], raf: 0, page: n };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      void rect;
       return;
     }
 
@@ -866,7 +875,7 @@ export default function Viewer({
       window.addEventListener("pointercancel", up);
       return;
     }
-    if (!drawTool || tool !== "freeform") {
+    if (!shapeActive() && (!drawTool || tool !== "freeform")) {
       // pan: any pointer pans when the pan tool is active, or touch when touch-pan mode
       if (tool === "pan" || (e.pointerType === "touch" && !touchDraw)) {
         e.preventDefault();
@@ -972,6 +981,7 @@ export default function Viewer({
     // finish move-drag → persist final positions (single upd op per ann for undo)
     if (tool === "select" && selDragRef.current) {
       const drag = selDragRef.current;
+      if (drag.raf) cancelAnimationFrame(drag.raf);
       selDragRef.current = null;
       const dx = drag.lastDx ?? 0;
       const dy = drag.lastDy ?? 0;
@@ -1269,7 +1279,7 @@ export default function Viewer({
       const L = laserRef.current;
       if (!L) { return; }
       L.raf = 0;
-      const wet = wetRefs.current.get(page);
+      const wet = wetRefs.current.get(laserRef.current?.page ?? page);
       if (!wet) return;
       const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
       const w = (base?.w ?? 0) * scale;
@@ -1298,11 +1308,31 @@ export default function Viewer({
     });
   }, [base, scale, page]);
 
+  // laser: stop the fade loop if the tool changes mid-trail
+  useEffect(() => {
+    if (tool !== "laser" && laserRef.current) {
+      if (laserRef.current.raf) cancelAnimationFrame(laserRef.current.raf);
+      laserRef.current = null;
+    }
+  }, [tool]);
+
   /* dev: 'r' opens radial at viewport center */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "r" || e.key === "R") setRadialPos({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
       if (e.key === "Escape") setRadialPos(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /* dev keys: 'b' free-form, 'e' eraser */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "e" || e.key === "E") {
+        setTool("freeform");
+        setToolState((t) => ({ ...t, tool: "eraser" }));
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
