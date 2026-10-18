@@ -8,6 +8,10 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    watch: {
+      // cargo relinks target DLLs during `tauri dev` — watching them crashes vite (EBUSY)
+      ignored: ["**/src-tauri/target/**"],
+    },
   },
   build: {
     target: "chrome110",

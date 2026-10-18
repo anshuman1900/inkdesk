@@ -1,75 +1,38 @@
 import { useEffect, useState } from "react";
 import Database from "@tauri-apps/plugin-sql";
+import Splash from "./screens/Splash";
+import Home, { type DocMeta } from "./screens/Home";
+import Viewer from "./viewer/Viewer";
 import KitPage from "./pages/KitPage";
+import { openFileByPath, FIXTURE_PATH } from "./lib/doc";
 
-type TableRow = { name: string };
-
-function Home() {
-  const [tables, setTables] = useState<string[] | null>(null);
-  const [error, setError] = useState<string>("");
-
-  useEffect(() => {
-    let cancelled = false;
-    Database.load("sqlite:inkdesk.db")
-      .then((db) =>
-        db.select<TableRow[]>(
-          "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
-        ),
-      )
-      .then((rows) => {
-        if (!cancelled) setTables(rows.map((r) => r.name));
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const coreTables = (tables ?? []).filter((t) => !t.startsWith("_"));
-
-  return (
-    <main className="content">
-      <h1>Inkdesk</h1>
-      <p className="tagline">
-        Free, local-first PDF markup + notes. Every feature unlocked.
-      </p>
-      <section className="card">
-        <h2>P1 exit checks</h2>
-        <ul>
-          <li>
-            Window opens (Tauri 2 + WebView2): <b className="ok">pass</b>
-          </li>
-          <li>
-            SQLite schema:{" "}
-            {error ? (
-              <b className="bad">error — {error}</b>
-            ) : tables === null ? (
-              <b>loading…</b>
-            ) : coreTables.length === 8 ? (
-              <b className="ok">pass — 8 tables</b>
-            ) : (
-              <b className="bad">{coreTables.length} tables (expected 8)</b>
-            )}
-          </li>
-        </ul>
-        {tables !== null && <pre className="tables">{coreTables.join("\n")}</pre>}
-      </section>
-    </main>
-  );
-}
+type Phase = "splash" | "home" | "viewer";
 
 export default function App() {
+  const [phase, setPhase] = useState<Phase>("splash");
+  const [doc, setDoc] = useState<DocMeta | null>(null);
   const [showKit, setShowKit] = useState(
     () => window.location.hash === "#kit",
   );
 
   useEffect(() => {
+    // warm the DB while the splash shows
+    Database.load("sqlite:inkdesk.db").catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const onHash = () => setShowKit(window.location.hash === "#kit");
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "k" || e.key === "K") setShowKit((v) => !v);
-      if (e.key === "Escape") setShowKit(false);
+      if (e.key === "F8") {
+        // dev shortcut: open the 120-page perf fixture (removed at release gate)
+        void openFileByPath(FIXTURE_PATH).then((r) => {
+          if ("meta" in r) {
+            setDoc(r.meta);
+            setPhase("viewer");
+          }
+        });
+      }
     };
     window.addEventListener("hashchange", onHash);
     window.addEventListener("keydown", onKey);
@@ -79,16 +42,39 @@ export default function App() {
     };
   }, []);
 
+  if (showKit) {
+    return (
+      <div className="shell">
+        <header className="titlebar">
+          <span className="logo-dot" />
+          <span className="title">Inkdesk</span>
+          <span className="version">P2 UI kit · press K to exit</span>
+        </header>
+        <KitPage />
+      </div>
+    );
+  }
+
   return (
-    <div className="shell">
-      <header className="titlebar">
-        <span className="logo-dot" />
-        <span className="title">Inkdesk</span>
-        <span className="version">
-          v0.1.0 · {showKit ? "P2 UI kit" : "P1 scaffold"} · press K to toggle kit
-        </span>
-      </header>
-      {showKit ? <KitPage /> : <Home />}
+    <div className="shell shell--app">
+      {phase === "splash" && <Splash onDone={() => setPhase("home")} />}
+      {phase === "home" && (
+        <Home
+          onOpen={(m) => {
+            setDoc(m);
+            setPhase("viewer");
+          }}
+        />
+      )}
+      {phase === "viewer" && doc && (
+        <Viewer
+          meta={doc}
+          onBack={() => {
+            setDoc(null);
+            setPhase("home");
+          }}
+        />
+      )}
     </div>
   );
 }

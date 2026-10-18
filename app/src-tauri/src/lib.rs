@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use tauri::State;
+use tauri::{Manager, State};
 
 /// Registry of opened documents: id -> absolute path.
 #[derive(Default)]
@@ -18,8 +18,7 @@ fn hash_path(s: &str) -> u64 {
     hash
 }
 
-/// Register a PDF path; returns "<id>:<size_bytes>". Stub for P1 — the
-/// custom protocol + metadata expansion lands in P4.
+/// Register a PDF path; returns "<id>:<size_bytes>".
 #[tauri::command]
 fn doc_register(path: String, registry: State<DocRegistry>) -> Result<String, String> {
     let p = PathBuf::from(&path);
@@ -56,6 +55,42 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(DocRegistry::default())
         .invoke_handler(tauri::generate_handler![doc_register])
+        // Stream registered PDF bytes into the webview: inkdesk://pdf/<id>
+        .register_uri_scheme_protocol("inkdesk", |ctx, request| {
+            let id = request
+                .uri()
+                .path()
+                .trim_start_matches('/')
+                .to_string();
+            let lookup = ctx
+                .app_handle()
+                .state::<DocRegistry>()
+                .0
+                .lock()
+                .ok()
+                .and_then(|reg| reg.get(&id).cloned());
+            match lookup {
+                Some(fp) => match std::fs::read(&fp) {
+                    Ok(bytes) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", "application/pdf")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Cache-Control", "no-store")
+                        .body(bytes)
+                        .unwrap(),
+                    Err(e) => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(format!("read error: {}", e).into_bytes())
+                        .unwrap(),
+                },
+                None => tauri::http::Response::builder()
+                    .status(404)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(b"unknown doc id".to_vec())
+                    .unwrap(),
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running inkdesk");
 }
