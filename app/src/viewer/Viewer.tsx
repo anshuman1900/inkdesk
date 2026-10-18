@@ -277,6 +277,12 @@ export default function Viewer({
 
   const shapeActive = () => tool === "shapes";
 
+  /* pen pressure clamped into a visible band — some tablets/drivers report 0 */
+  const penPressure = (raw: number): number => {
+    if (!raw || raw < 0.04) return 0.5;      // dead reporting -> constant width
+    return Math.max(0.35, Math.min(1, raw)); // visible modulation
+  };
+
   /* ---- text review: capture text-layer selection on mouseup ---- */
   useEffect(() => {
     if (tool !== "review") return;
@@ -404,8 +410,8 @@ export default function Viewer({
       return;
     }
 
-    // real pen pressure (0..1); mouse uses simulatePressure instead
-    const pressure = isPen ? Math.max(0.02, Math.min(1, e.pressure || 0.5)) : 0.5;
+    // pen pressure clamped into a visible band — some tablets/drivers report 0
+    const pressure = isPen ? penPressure(e.pressure) : 0.5;
     strokeRef.current = {
       pts: [[px, py, pressure]],
       dirty: true,
@@ -437,10 +443,10 @@ export default function Viewer({
       : [];
     if (events.length > 0) {
       for (const ce of events) {
-        cur.pts.push([(ce.clientX - rect.left) / scale, (ce.clientY - rect.top) / scale, pressure * 2]);
+        cur.pts.push([(ce.clientX - rect.left) / scale, (ce.clientY - rect.top) / scale, penPressure(ce.pressure)]);
       }
     } else {
-      cur.pts.push([(e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale, pressure * 2]);
+      cur.pts.push([(e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale, penPressure(e.pressure)]);
     }
     cur.dirty = true;
     scheduleWet();
