@@ -334,43 +334,49 @@ export function Toggle({
   );
 }
 
-/* Radial menu — static geometry mock (interactions land in P9) */
-const RADIAL_SLOTS: { glyph: GlyphName; category: "draw" | "insert" | "measure" | "select" | "pro" | "neutral"; label: string }[] = [
-  { glyph: "pan", category: "neutral", label: "Pan" },
-  { glyph: "select", category: "select", label: "Select" },
-  { glyph: "pen", category: "draw", label: "Pen" },
-  { glyph: "pen2", category: "draw", label: "Pen 2" },
-  { glyph: "highlighter", category: "draw", label: "Highlighter" },
-  { glyph: "eraser", category: "draw", label: "Eraser" },
-  { glyph: "textreview", category: "draw", label: "Text review" },
-  { glyph: "more", category: "pro", label: "More" },
-];
+/* Radial menu — interactive (P9): slots activate tools */
+export interface RadialSlot {
+  glyph: GlyphName;
+  label: string;
+  cat: string;
+  onClick: () => void;
+  active?: boolean;
+}
 
-export function RadialMenu() {
+export function RadialMenu({
+  slots,
+  onClose,
+}: {
+  slots: RadialSlot[];
+  onClose: () => void;
+}) {
   return (
-    <div className="radial">
-      {RADIAL_SLOTS.map((slot, i) => {
-        const angle = (i / RADIAL_SLOTS.length) * 2 * Math.PI - Math.PI / 2;
-        const r = 86;
-        const x = Math.cos(angle) * r;
-        const y = Math.sin(angle) * r;
-        return (
-          <button
-            key={slot.label}
-            className={`tool-btn tool-btn--${slot.category} radial__slot`}
-            style={
-              {
-                transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`,
-              } as CSSProperties
-            }
-            title={slot.label}
-            aria-label={slot.label}
-          >
-            <Glyph name={slot.glyph} size={22} />
-          </button>
-        );
-      })}
-      <div className="radial__center" />
+    <div className="radial-backdrop" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }}>
+      <div
+        className="radial radial--live"
+        onClick={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.stopPropagation()}
+      >
+        {slots.map((slot, i) => {
+          const angle = (i / slots.length) * 2 * Math.PI - Math.PI / 2;
+          const r = 86;
+          const x = Math.cos(angle) * r;
+          const y = Math.sin(angle) * r;
+          return (
+            <button
+              key={slot.label}
+              className={`tool-btn tool-btn--${slot.cat} radial__slot ${slot.active ? "is-active" : ""}`}
+              style={{ transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))` } as CSSProperties}
+              title={slot.label}
+              aria-label={slot.label}
+              onClick={() => { slot.onClick(); onClose(); }}
+            >
+              <Glyph name={slot.glyph} size={22} />
+            </button>
+          );
+        })}
+        <div className="radial__center" />
+      </div>
     </div>
   );
 }

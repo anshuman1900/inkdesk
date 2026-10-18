@@ -7,8 +7,10 @@ import {
   SubTool,
   ColorChip,
   WidthPreview,
+  RadialMenu,
   type GlyphName,
 } from "../ui/kit";
+import { loadFavorites, saveFavorites, type Favorite } from "../lib/favorites";
 import {
   annStore,
   uid,
@@ -34,8 +36,8 @@ const TOOLBAR: { id: ToolId; label: string; glyph?: GlyphName }[] = [
   { id: "library", label: "", glyph: "pro" },
 ];
 
-const RAIL_TOP: { glyph: GlyphName; label: string; badge?: string }[] = [
-  { glyph: "pen", label: "Favorites", badge: "12" },
+const RAIL_TOP: { glyph: GlyphName; label: string }[] = [
+  { glyph: "pen", label: "Favorites" },
   { glyph: "insert", label: "Documents" },
   { glyph: "more", label: "More" },
 ];
@@ -49,22 +51,12 @@ const RAIL_BOTTOM: { glyph: GlyphName; label: string }[] = [
   { glyph: "measure", label: "Settings" },
 ];
 
-const FLYOUT_CHIPS: { glyph: GlyphName; cat: string; count?: number }[] = [
-  { glyph: "pen", cat: "cat-select", count: 12 },
-  { glyph: "highlighter", cat: "cat-draw", count: 20 },
-  { glyph: "eraser", cat: "cat-insert", count: 10 },
-  { glyph: "shapes", cat: "cat-select", count: 12 },
-  { glyph: "textreview", cat: "cat-pro" },
-  { glyph: "pen2", cat: "cat-select" },
-  { glyph: "insert", cat: "cat-measure" },
-];
-
 const INK_COLORS = ["#ff4d4d", "#2f6bff", "#1e1f24", "#58c770", "#f2b23e", "#a06bff"];
 const PAGE_GAP = 18;
 const MAX_DPR = 1.5;
 
 export default function Viewer({
-  meta, tabs, night, layout, touchDraw,
+  meta, tabs, night, layout, touchDraw, radialOn,
   onSelectTab, onCloseTab, onAddTab, onToggleNight, onOpenSettings, onBack,
 }: {
   meta: DocMeta;
@@ -72,6 +64,7 @@ export default function Viewer({
   night: boolean;
   layout: "continuous" | "single";
   touchDraw: boolean;
+  radialOn: boolean;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onAddTab: () => void;
@@ -105,6 +98,38 @@ export default function Viewer({
   const [flyoutOpen, setFlyoutOpen] = useState(false);
   const [firstPaint, setFirstPaint] = useState<number | null>(null);
   const [err, setErr] = useState("");
+  const [favs, setFavs] = useState<Favorite[]>([]);
+  const [radialPos, setRadialPos] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    void loadFavorites().then(setFavs);
+  }, []);
+
+  const addFavorite = () => {
+    const st = toolRef.current;
+    if (st.tool === "eraser") return;
+    const fav: Favorite = {
+      id: uid(),
+      tool: st.tool,
+      color: st.color,
+      width: st.width,
+      opacity: st.opacity,
+    };
+    const next = [...favs, fav].slice(-12);
+    setFavs(next);
+    void saveFavorites(next).catch(() => {});
+  };
+
+  const removeFavorite = (id: string) => {
+    const next = favs.filter((f) => f.id !== id);
+    setFavs(next);
+    void saveFavorites(next).catch(() => {});
+  };
+
+  const applyFavorite = (f: Favorite) => {
+    setTool("freeform");
+    setToolState({ tool: f.tool, color: f.color, width: f.width, opacity: f.opacity });
+  };
 
   // ink store subscription (re-render on any annotation change)
   useSyncExternalStore(
@@ -385,6 +410,16 @@ export default function Viewer({
     renderRange();
   }, [base, scale, numPages, layout, renderRange]);
 
+  /* dev: 'r' opens radial at viewport center */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "r" || e.key === "R") setRadialPos({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+      if (e.key === "Escape") setRadialPos(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   /* dev: 'b' toggles free-form / pan */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -492,9 +527,12 @@ export default function Viewer({
       <div className="viewer__body">
         <div className="rail">
           {RAIL_TOP.map((r) => (
-            <button key={r.label} className="rail__btn" title={r.label}>
+            <button key={r.label} className="rail__btn" title={r.label}
+              onClick={r.label === "Favorites" ? () => setFlyoutOpen((v) => !v) : undefined}>
               <Glyph name={r.glyph} size={18} />
-              {r.badge && <span className="rail__badge">{r.badge}</span>}
+              {r.label === "Favorites" && favs.length > 0 && (
+                <span className="rail__badge">{favs.length}</span>
+              )}
             </button>
           ))}
           <div className="rail__divider" />
@@ -512,7 +550,14 @@ export default function Viewer({
           ))}
         </div>
 
-        <div className="stage">
+        <div
+          className="stage"
+          onContextMenu={(e) => {
+            if (!radialOn) return;
+            e.preventDefault();
+            setRadialPos({ x: e.clientX, y: e.clientY });
+          }}
+        >
           <div className="toolbar">
             {TOOLBAR.map((t) => (
               <button key={t.id}
@@ -540,6 +585,13 @@ export default function Viewer({
                 <ColorChip key={c} color={c} selected={toolState.color === c}
                   onClickOverride={() => setToolState({ ...toolState, color: c })} />
               ))}
+              <span className="color-chip color-chip--custom" title="Custom color" style={{ background: toolState.color }}>
+                <input
+                  type="color"
+                  value={toolState.color}
+                  onChange={(e) => setToolState({ ...toolState, color: e.target.value })}
+                />
+              </span>
               <WidthPreview width={1.4} label="" selected={toolState.width <= 3}
                 onClickOverride={() => setToolState({ ...toolState, width: 2 })} />
               <WidthPreview width={4.5} label="" selected={toolState.width > 3}
@@ -601,15 +653,48 @@ export default function Viewer({
             <Glyph name="select" size={16} />
           </button>
           <div className={`flyout ${flyoutOpen ? "is-open" : ""}`}>
-            <button className="flyout__star" title="Pin"><Glyph name="pro" size={16} /></button>
-            {FLYOUT_CHIPS.map((c, i) => (
-              <button key={i} className="flyout__chip" style={{ background: `var(--${c.cat})` }}>
-                <Glyph name={c.glyph} size={18} />
-                {c.count !== undefined && <span className="flyout__count">{c.count}</span>}
+            <button className="flyout__star" title="Pin the current tool below">
+              <Glyph name="pro" size={16} />
+            </button>
+            {favs.map((f) => (
+              <button
+                key={f.id}
+                className="flyout__chip"
+                style={{ background: f.color, color: "#0d131c" }}
+                onClick={() => applyFavorite(f)}
+                title={`${f.tool} ${f.color} w${f.width}`}
+              >
+                <Glyph name={f.tool === "highlighter" ? "highlighter" : f.tool === "eraser" ? "eraser" : "pen"} size={18} />
+                <span
+                  className="chip-x"
+                  onClick={(e) => { e.stopPropagation(); removeFavorite(f.id); }}
+                  role="button"
+                  aria-label="remove favorite"
+                >
+                  ×
+                </span>
               </button>
             ))}
-            <button className="flyout__add" title="Add tool — P10">+</button>
+            <button className="flyout__add" title="Pin current tool" onClick={addFavorite}>+</button>
           </div>
+
+          {radialPos && (
+            <div style={{ position: "fixed", left: radialPos.x, top: radialPos.y, zIndex: 251 }}>
+              <RadialMenu
+                onClose={() => setRadialPos(null)}
+                slots={[
+                  { glyph: "pan", label: "Pan", cat: "neutral", active: tool === "pan", onClick: () => setTool("pan") },
+                  { glyph: "select", label: "Select", cat: "select", active: tool === "select", onClick: () => setTool("select") },
+                  { glyph: "pen", label: "Pen", cat: "draw", active: tool === "freeform" && toolState.tool === "pen", onClick: () => { setTool("freeform"); setToolState({ ...toolState, tool: "pen" }); } },
+                  { glyph: "pen2", label: "Pen (blue)", cat: "draw", onClick: () => { setTool("freeform"); setToolState({ tool: "pen", color: "#2f6bff", width: 2.4, opacity: 1 }); } },
+                  { glyph: "highlighter", label: "Highlighter", cat: "draw", active: tool === "freeform" && toolState.tool === "highlighter", onClick: () => { setTool("freeform"); setToolState({ ...toolState, tool: "highlighter" }); } },
+                  { glyph: "eraser", label: "Eraser", cat: "insert", active: tool === "freeform" && toolState.tool === "eraser", onClick: () => { setTool("freeform"); setToolState({ ...toolState, tool: "eraser" }); } },
+                  { glyph: "textreview", label: "Review", cat: "pro", active: tool === "review", onClick: () => setTool("review") },
+                  { glyph: "more", label: "Insert", cat: "pro", active: tool === "insert", onClick: () => setTool("insert") },
+                ]}
+              />
+            </div>
+          )}
 
           {err && <div className="viewer__error">{err}</div>}
           {firstPaint !== null && <div className="perf-chip">first page: {Math.round(firstPaint)} ms</div>}

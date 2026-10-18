@@ -140,6 +140,7 @@ export default function App() {
           night={!!night[activeDoc.id]}
           layout={settings.layout}
           touchDraw={settings.touchDraw}
+          radialOn={settings.radialOn}
           onSelectTab={(id) => setActiveId(id)}
           onCloseTab={closeTab}
           onAddTab={() => setPhase("home")}

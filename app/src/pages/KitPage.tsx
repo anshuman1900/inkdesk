@@ -2,8 +2,8 @@ import {
   CategoryChip,
   ColorChip,
   FavBar,
+  Glyph,
   Panel,
-  RadialMenu,
   Slider,
   SubRow,
   SubTool,
@@ -57,7 +57,22 @@ export default function KitPage() {
 
         <Panel title="Radial menu (static geometry — P9 wires behavior)">
           <div className="radial-stage">
-            <RadialMenu />
+            <div className="radial">
+              {["pan", "select", "pen", "pen2", "highlighter", "eraser", "textreview", "more"].map((g, i) => {
+                const angle = (i / 8) * 2 * Math.PI - Math.PI / 2;
+                const r = 86;
+                const x = Math.cos(angle) * r;
+                const y = Math.sin(angle) * r;
+                const cat = ["neutral", "select", "draw", "draw", "draw", "insert", "pro", "pro"][i];
+                return (
+                  <button key={g} className={`tool-btn tool-btn--${cat} radial__slot ${i === 2 ? "is-active" : ""}`}
+                    style={{ transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))` }}>
+                    <Glyph name={g as never} size={22} />
+                  </button>
+                );
+              })}
+              <div className="radial__center" />
+            </div>
           </div>
         </Panel>
 

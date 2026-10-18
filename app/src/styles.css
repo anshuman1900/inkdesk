@@ -474,3 +474,31 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .pages.night .dry-canvas,
 .pages.night .wet-canvas { filter: inherit; }
+
+/* ============ P9 radial (live) + P10 favorites ============ */
+
+.radial-backdrop {
+  position: fixed; inset: 0; z-index: 250;
+  background: rgba(6, 10, 16, 0.25);
+}
+
+.radial--live { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.radial--live .radial__slot { box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5); }
+.radial--live .radial__center {
+  background: var(--chrome-raised); border: 2px solid var(--chrome-border);
+  display: flex; align-items: center; justify-content: center; color: var(--text-muted);
+}
+
+.flyout__chip { position: relative; }
+.flyout__chip .chip-x {
+  position: absolute; top: -6px; right: -6px; width: 15px; height: 15px;
+  border-radius: 50%; border: 0; background: var(--chrome); color: var(--text);
+  font-size: 10px; line-height: 1; cursor: pointer; display: none;
+  align-items: center; justify-content: center; padding: 0;
+}
+.flyout__chip:hover .chip-x { display: inline-flex; }
+
+.color-chip--custom { position: relative; overflow: hidden; }
+.color-chip--custom input[type="color"] {
+  position: absolute; inset: -4px; opacity: 0; cursor: pointer; width: 150%; height: 150%;
+}
