@@ -34,6 +34,25 @@ export interface InkStyle {
   color: string;
   width: number; // stroke width in page units at scale 1
   opacity: number; // 0..1
+  dash?: boolean;
+}
+
+export type ShapeKind =
+  | "rectangle" | "ellipse" | "line" | "arrow"
+  | "polyline" | "polygon" | "cloud";
+
+export interface ShapeGeometry {
+  kind: ShapeKind;
+  x0: number; y0: number; x1: number; y1: number;
+  pts?: number[][]; // polyline/polygon vertices
+}
+
+export type ReviewStyle = "highlight" | "underline" | "squiggle" | "strike";
+
+export interface ReviewGeometry {
+  rects: number[][]; // [x, y, w, h] in page units
+  style: ReviewStyle;
+  text?: string;
 }
 
 /* ---------- tool state ---------- */
@@ -215,14 +234,15 @@ export function strokePath2D(
   style: InkStyle,
   scale: number,
   isHighlighter: boolean,
+  simulatePressure = true,
 ): Path2D {
   const outline = getStroke(points, {
     size: style.width * scale,
-    thinning: isHighlighter ? 0 : 0.62,
-    smoothing: 0.62,
-    streamline: 0.42,
+    thinning: isHighlighter ? 0 : 0.55,
+    smoothing: 0.6,
+    streamline: 0.34,   // responsive for fast pen writing
     easing: (t) => t,
-    simulatePressure: true,
+    simulatePressure,
     last: true,
   });
   const path = new Path2D();
@@ -239,4 +259,151 @@ export function strokePath2D(
   }
   path.closePath();
   return path;
+}
+
+
+/* ---------- shape drawing ---------- */
+
+export function drawShape(
+  ctx: CanvasRenderingContext2D,
+  g: ShapeGeometry,
+  style: InkStyle,
+  scale: number,
+): void {
+  const x0 = Math.min(g.x0, g.x1) * scale;
+  const y0 = Math.min(g.y0, g.y1) * scale;
+  const x1 = Math.max(g.x0, g.x1) * scale;
+  const y1 = Math.max(g.y0, g.y1) * scale;
+  ctx.save();
+  ctx.globalAlpha = style.opacity;
+  ctx.strokeStyle = style.color;
+  ctx.lineWidth = style.width * scale;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.setLineDash(style.dash ? [style.width * scale * 3, style.width * scale * 2.4] : []);
+
+  const bumpCloud = () => {
+    const r = Math.max(7 * scale, (x1 - x0) / 14);
+    const edges: [number, number, number, number][] = [
+      [x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0],
+    ];
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    for (const [ax, ay, bx, by] of edges) {
+      const len = Math.hypot(bx - ax, by - ay);
+      const bumps = Math.max(2, Math.round(len / (r * 1.6)));
+      const nx = -(by - ay) / len;
+      const ny = (bx - ax) / len;
+      const dir = edges.indexOf([ax, ay, bx, by] as never) === 3 ? -1 : 1;
+      for (let i = 1; i <= bumps; i++) {
+        const t0 = (i - 0.5) / bumps;
+        const t1 = i / bumps;
+        const mx = ax + (bx - ax) * t0 + nx * r * 0.62 * dir;
+        const my = ay + (by - ay) * t0 + ny * r * 0.62 * dir;
+        ctx.quadraticCurveTo(mx, my, ax + (bx - ax) * t1, ay + (by - ay) * t1);
+      }
+    }
+    ctx.closePath();
+    ctx.stroke();
+  };
+
+  switch (g.kind) {
+    case "rectangle":
+      ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      break;
+    case "ellipse": {
+      ctx.beginPath();
+      ctx.ellipse((x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    }
+    case "line":
+      ctx.beginPath();
+      ctx.moveTo(g.x0 * scale, g.y0 * scale);
+      ctx.lineTo(g.x1 * scale, g.y1 * scale);
+      ctx.stroke();
+      break;
+    case "arrow": {
+      const ax = g.x0 * scale;
+      const ay = g.y0 * scale;
+      const bx = g.x1 * scale;
+      const by = g.y1 * scale;
+      const ang = Math.atan2(by - ay, bx - ax);
+      const head = Math.max(9 * scale, style.width * scale * 4);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx - head * Math.cos(ang - 0.44), by - head * Math.sin(ang - 0.44));
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx - head * Math.cos(ang + 0.44), by - head * Math.sin(ang + 0.44));
+      ctx.stroke();
+      break;
+    }
+    case "polyline":
+    case "polygon": {
+      const pts = g.pts ?? [];
+      if (pts.length < 2) break;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0] * scale, pts[0][1] * scale);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] * scale, pts[i][1] * scale);
+      if (g.kind === "polygon") ctx.closePath();
+      ctx.stroke();
+      break;
+    }
+    case "cloud":
+      bumpCloud();
+      break;
+  }
+  ctx.restore();
+}
+
+/* ---------- text review drawing ---------- */
+
+export function drawTextReview(
+  ctx: CanvasRenderingContext2D,
+  g: ReviewGeometry,
+  style: InkStyle,
+  scale: number,
+): void {
+  ctx.save();
+  ctx.globalAlpha = g.style === "highlight" ? 0.38 : style.opacity;
+  for (const [rx, ry, rw, rh] of g.rects) {
+    const x = rx * scale;
+    const y = ry * scale;
+    const w = rw * scale;
+    const h = rh * scale;
+    if (g.style === "highlight") {
+      ctx.fillStyle = style.color;
+      ctx.fillRect(x, y, w, h);
+    } else if (g.style === "underline") {
+      ctx.strokeStyle = style.color;
+      ctx.lineWidth = style.width * scale;
+      ctx.beginPath();
+      ctx.moveTo(x, y + h - style.width * scale);
+      ctx.lineTo(x + w, y + h - style.width * scale);
+      ctx.stroke();
+    } else if (g.style === "strike") {
+      ctx.strokeStyle = style.color;
+      ctx.lineWidth = style.width * scale;
+      ctx.beginPath();
+      ctx.moveTo(x, y + h / 2);
+      ctx.lineTo(x + w, y + h / 2);
+      ctx.stroke();
+    } else {
+      // squiggle
+      ctx.strokeStyle = style.color;
+      ctx.lineWidth = style.width * scale * 0.8;
+      ctx.beginPath();
+      const yy = y + h - style.width * scale;
+      const amp = style.width * scale * 1.6;
+      ctx.moveTo(x, yy);
+      const seg = Math.max(4, w / 10);
+      for (let px = x; px < x + w; px += seg) {
+        ctx.quadraticCurveTo(px + seg / 2, yy + amp, Math.min(px + seg, x + w), yy);
+      }
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
 }

@@ -458,7 +458,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .ink-overlay {
   position: absolute; inset: 0;
-  touch-action: pan-x pan-y;   /* touch pans unless touchDraw */
+  touch-action: none;          /* browser never steals pen/touch — pan handled in JS */
   z-index: 5;
 }
 
@@ -502,3 +502,13 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .color-chip--custom input[type="color"] {
   position: absolute; inset: -4px; opacity: 0; cursor: pointer; width: 150%; height: 150%;
 }
+
+/* P12 text review: text layer selectable, overlay passthrough */
+.ink-overlay.is-transparent { pointer-events: none; }
+
+.textlayer {
+  position: absolute; inset: 0; overflow: hidden; z-index: 4;
+  line-height: 1; opacity: 0.999; pointer-events: none;
+}
+.ink-overlay.is-transparent ~ .textlayer { pointer-events: auto; }
+.textlayer span { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0 0; }

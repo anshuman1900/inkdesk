@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { openPdf, renderPage, type PDFHandle } from "../pdf/engine";
+import { openPdf, renderPage, renderTextLayer, type PDFHandle } from "../pdf/engine";
 import type { DocMeta } from "../screens/Home";
 import {
   Glyph,
@@ -15,9 +15,14 @@ import {
   annStore,
   uid,
   strokePath2D,
+  drawShape,
+  drawTextReview,
   DEFAULT_TOOL,
   type Annotation,
   type ToolState,
+  type ShapeKind,
+  type ShapeGeometry,
+  type ReviewStyle,
 } from "../lib/ink";
 import { loadAnns, putAnn, delAnn, syncOp } from "../lib/annDb";
 
@@ -76,6 +81,7 @@ export default function Viewer({
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const dryRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const wetRefs = useRef<Map<number, HTMLCanvasElement>>(new Map());
+  const textRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const renderedRef = useRef<Set<number>>(new Set());
   const renderJobsRef = useRef<Map<number, Promise<void>>>(new Map());
   const pdfRef = useRef<PDFHandle | null>(null);
@@ -87,8 +93,13 @@ export default function Viewer({
   const [toolState, setToolState] = useState<ToolState>({ ...DEFAULT_TOOL });
   const toolRef = useRef<ToolState>(toolState);
   toolRef.current = toolState;
-  const strokeRef = useRef<{ pts: number[][]; dirty: boolean } | null>(null);
+  const strokeRef = useRef<{ pts: number[][]; dirty: boolean; isPen: boolean } | null>(null);
+  const panRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
   const rafRef = useRef(0);
+  const [shapeKind, setShapeKind] = useState<ShapeKind>("rectangle");
+  const [shapeDash, setShapeDash] = useState(false);
+  const shapeRef = useRef<{ x0: number; y0: number; x1: number; y1: number; pts: number[][] } | null>(null);
+  const [reviewStyle, setReviewStyle] = useState<ReviewStyle>("highlight");
 
   const [base, setBase] = useState<{ w: number; h: number } | null>(null);
   const [scale, setScale] = useState(1);
@@ -200,6 +211,10 @@ export default function Viewer({
         ctx.fillStyle = ann.style.color;
         ctx.fill(path);
         ctx.globalAlpha = 1;
+      } else if (ann.type === "shape") {
+        drawShape(ctx, ann.geometry as ShapeGeometry, ann.style, scale);
+      } else if (ann.type === "text_review") {
+        drawTextReview(ctx, ann.geometry as import("../lib/ink").ReviewGeometry, ann.style, scale);
       }
     }
   }, [base, scale, meta.id]);
@@ -230,11 +245,19 @@ export default function Viewer({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const st = toolRef.current;
-    const path = strokePath2D(cur.pts, st, scale, st.tool === "highlighter");
-    ctx.globalAlpha = st.tool === "highlighter" ? 0.45 : st.opacity;
-    ctx.fillStyle = st.color;
-    ctx.fill(path);
-    ctx.globalAlpha = 1;
+    if (shapeRef.current) {
+      const g: ShapeGeometry =
+        shapeRef.current.pts.length > 0
+          ? { kind: shapeKind, x0: shapeRef.current.x0, y0: shapeRef.current.y0, x1: shapeRef.current.x1, y1: shapeRef.current.y1, pts: shapeRef.current.pts }
+          : { kind: shapeKind, x0: shapeRef.current.x0, y0: shapeRef.current.y0, x1: shapeRef.current.x1, y1: shapeRef.current.y1 };
+      drawShape(ctx, g, { color: st.color, width: st.width, opacity: st.opacity, dash: shapeDash }, scale);
+    } else {
+      const path = strokePath2D(cur.pts, st, scale, st.tool === "highlighter", !cur.isPen);
+      ctx.globalAlpha = st.tool === "highlighter" ? 0.45 : st.opacity;
+      ctx.fillStyle = st.color;
+      ctx.fill(path);
+      ctx.globalAlpha = 1;
+    }
     cur.dirty = false;
   }, [base, scale, page]);
 
@@ -246,6 +269,74 @@ export default function Viewer({
     });
   }, [paintWet]);
 
+  const shapeActive = () => tool === "shapes";
+
+  /* ---- text review: capture text-layer selection on mouseup ---- */
+  useEffect(() => {
+    if (tool !== "review") return;
+    const onUp = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+      const text = sel.toString();
+      if (!text.trim()) return;
+      // rects are viewport-relative; convert to first page-slot-local, then page units
+      const range = sel.getRangeAt(0);
+      const rects = [...range.getClientRects()];
+      if (rects.length === 0) return;
+      // find the page slot containing the first rect
+      const slot = rects[0].top >= 0 ? (rects[0].top as number) : 0;
+      void slot;
+      let overlay: HTMLElement | null = null;
+      for (const el of document.querySelectorAll(".ink-overlay")) {
+        const r = el.getBoundingClientRect();
+        if (rects[0].left >= r.left - 2 && rects[0].right <= r.right + 2 && rects[0].top >= r.top - 2 && rects[0].bottom <= r.bottom + 200) {
+          overlay = el as HTMLElement;
+          break;
+        }
+      }
+      if (!overlay) return;
+      const pageSlot = overlay.parentElement as HTMLElement;
+      const slotRect = pageSlot.getBoundingClientRect();
+      // page index from slot position among slots
+      const slots = [...document.querySelectorAll(".page-slot")];
+      const pageIndex = slots.indexOf(pageSlot);
+      if (pageIndex < 0) return;
+      const pageRects = rects
+        .filter((r) => {
+          const rr = r;
+          return rr.width > 1 && rr.height > 1;
+        })
+        .map((r) => [
+          (r.left - slotRect.left) / scale,
+          (r.top - slotRect.top) / scale,
+          r.width / scale,
+          r.height / scale,
+        ]);
+      if (pageRects.length === 0) return;
+      const st = toolRef.current;
+      const ann: Annotation = {
+        id: uid(),
+        docId: meta.id,
+        page: pageIndex,
+        type: "text_review",
+        geometry: { rects: pageRects, style: reviewStyle, text },
+        style: {
+          color: reviewStyle === "highlight" ? "#f2e94e" : st.color,
+          width: reviewStyle === "underline" ? 1.6 : reviewStyle === "squiggle" ? 1.4 : 1.8,
+          opacity: 1,
+        },
+        z: Date.now() % 1e9,
+        createdAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+      };
+      annStore.add(ann);
+      void putAnn(ann).catch(() => {});
+      sel.removeAllRanges();
+    };
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [tool, reviewStyle, scale, meta.id]);
+
   /* ---- pointer drawing on overlay ---- */
   const onOverlayPointerDown = (e: React.PointerEvent<HTMLDivElement>, n: number) => {
     const st = toolRef.current;
@@ -256,7 +347,9 @@ export default function Viewer({
     if (e.pointerType === "touch" && !touchWantsDraw) return; // let the browser pan/scroll
     if (!(isPen || isMouse || touchWantsDraw)) return;
 
-    if (st.tool === "eraser") {
+    // pen barrel button = eraser
+    const barrelErase = isPen && (e.buttons & 32) !== 0;
+    if (st.tool === "eraser" || barrelErase) {
       e.preventDefault();
       const rect = e.currentTarget.getBoundingClientRect();
       const x = (e.clientX - rect.left) / scale;
@@ -265,23 +358,55 @@ export default function Viewer({
       if (hit) void delAnn(hit.id).catch(() => {});
       return;
     }
-    if (!drawTool) return;
+    if (!drawTool) {
+      // pan: any pointer pans when the pan tool is active, or touch when touch-pan mode
+      if (tool === "pan" || (e.pointerType === "touch" && !touchDraw)) {
+        e.preventDefault();
+        const scroll = scrollRef.current;
+        if (scroll) {
+          panRef.current = { x: e.clientX, y: e.clientY, sl: scroll.scrollLeft, st: scroll.scrollTop };
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        }
+      }
+      return;
+    }
 
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     const rect = e.currentTarget.getBoundingClientRect();
-    const pressure = isPen && e.pressure > 0 ? e.pressure : isMouse ? 0.5 : e.pressure || 0.5;
+    const px = (e.clientX - rect.left) / scale;
+    const py = (e.clientY - rect.top) / scale;
+
+    if (shapeActive()) {
+      shapeRef.current = { x0: px, y0: py, x1: px, y1: py, pts: [[px, py]] };
+      scheduleWet();
+      return;
+    }
+
+    // real pen pressure (0..1); mouse uses simulatePressure instead
+    const pressure = isPen ? Math.max(0.02, Math.min(1, e.pressure || 0.5)) : 0.5;
     strokeRef.current = {
-      pts: [[(e.clientX - rect.left) / scale, (e.clientY - rect.top) / scale, pressure * 2]],
+      pts: [[px, py, pressure]],
       dirty: true,
+      isPen,
     };
     scheduleWet();
   };
 
   const onOverlayPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const cur = strokeRef.current;
-    if (!cur) return;
+    const shp = shapeRef.current;
+    if (!cur && !shp) return;
     e.preventDefault();
+    if (shp) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      shp.x1 = (e.clientX - rect.left) / scale;
+      shp.y1 = (e.clientY - rect.top) / scale;
+      shp.pts.push([shp.x1, shp.y1]);
+      scheduleWet();
+      return;
+    }
+    if (!cur) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const isPen = e.pointerType === "pen" && e.pressure > 0;
     const pressure = isPen ? e.pressure : e.pointerType === "mouse" ? 0.5 : 0.5;
@@ -300,6 +425,37 @@ export default function Viewer({
   };
 
   const onOverlayPointerUp = (e: React.PointerEvent<HTMLDivElement>, n: number) => {
+    if (e.pointerType === "touch" && panRef.current) {
+      panRef.current = null;
+      return;
+    }
+    const shp = shapeRef.current;
+    if (shp) {
+      e.preventDefault();
+      shapeRef.current = null;
+      const wet = wetRefs.current.get(n);
+      const wctx = wet?.getContext("2d");
+      if (wctx && wet) wctx.clearRect(0, 0, wet.width, wet.height);
+      const st = toolRef.current;
+      const ann: Annotation = {
+        id: uid(),
+        docId: meta.id,
+        page: n - 1,
+        type: "shape",
+        geometry: {
+          kind: shapeKind,
+          x0: shp.x0, y0: shp.y0, x1: shp.x1, y1: shp.y1,
+          pts: shapeKind === "polyline" || shapeKind === "polygon" ? shp.pts : undefined,
+        },
+        style: { color: st.color, width: st.width, opacity: st.opacity, dash: shapeDash },
+        z: Date.now() % 1e9,
+        createdAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+      };
+      annStore.add(ann);
+      void putAnn(ann).catch(() => {});
+      return;
+    }
     const cur = strokeRef.current;
     if (!cur) return;
     e.preventDefault();
@@ -375,12 +531,17 @@ export default function Viewer({
       const canvas = canvasRefs.current.get(n);
       if (!canvas) continue;
       const job = renderPage(doc, n, canvas, pageW, pageH, dpr)
-        .then(() => {
+        .then(async () => {
           renderedRef.current.add(n);
           renderJobsRef.current.delete(n);
           redrawDry(n);
           if (n === 1 && firstPaint === null) {
             setFirstPaint(performance.now() - t0Ref.current);
+          }
+          const tlDiv = textRefs.current.get(n);
+          if (tlDiv) {
+            const pg = await doc.getPage(n);
+            await renderTextLayer(pg, tlDiv, pageW).catch(() => {});
           }
         })
         .catch(() => {
@@ -575,6 +736,38 @@ export default function Viewer({
             ))}
           </div>
 
+          {/* Review expanded subrow */}
+          {tool === "review" && (
+            <div className="subrow under-toolbar">
+              <SubTool glyph="text" label="Text" />
+              <SubTool glyph="callout" label="Callout" />
+              <SubTool glyph="t_highlight" label="Highlight" active={reviewStyle === "highlight"} onClickOverride={() => setReviewStyle("highlight")} />
+              <SubTool glyph="t_underline" label="Underline" active={reviewStyle === "underline"} onClickOverride={() => setReviewStyle("underline")} />
+              <SubTool glyph="t_squiggle" label="Squiggle" active={reviewStyle === "squiggle"} onClickOverride={() => setReviewStyle("squiggle")} />
+              <SubTool glyph="t_strike" label="Strike" active={reviewStyle === "strike"} onClickOverride={() => setReviewStyle("strike")} />
+              <SubTool glyph="t_cleaner" label="Cleaner" title="click text-review marks to remove" />
+            </div>
+          )}
+
+          {/* Shapes expanded subrow */}
+          {tool === "shapes" && (
+            <div className="subrow under-toolbar">
+              {([
+                ["rectangle", "Rectangle"], ["ellipse", "Ellipse"], ["line", "Line"],
+                ["arrow", "Arrow"], ["polyline", "Polyline"], ["polygon", "Polygon"], ["cloud", "Cloud"],
+              ] as [ShapeKind, string][]).map(([kind, label]) => (
+                <SubTool key={kind}
+                  glyph={kind as never}
+                  label={label}
+                  active={shapeKind === kind}
+                  onClickOverride={() => setShapeKind(kind)}
+                />
+              ))}
+              <SubTool glyph="line" label={shapeDash ? "Dashed" : "Solid"} active={shapeDash}
+                onClickOverride={() => setShapeDash((d) => !d)} />
+            </div>
+          )}
+
           {/* free-form expanded subrow (colors + widths + eraser) */}
           {tool === "freeform" && (
             <div className="subrow under-toolbar">
@@ -609,8 +802,9 @@ export default function Viewer({
                   <canvas ref={(c) => { if (c) canvasRefs.current.set(n, c); else canvasRefs.current.delete(n); }} />
                   <canvas className="dry-canvas" ref={(c) => { if (c) dryRefs.current.set(n, c); else dryRefs.current.delete(n); }} />
                   <canvas className="wet-canvas" ref={(c) => { if (c) wetRefs.current.set(n, c); else wetRefs.current.delete(n); }} />
+                  <div className="textlayer" ref={(d) => { if (d) textRefs.current.set(n, d); else textRefs.current.delete(n); }} />
                   <div
-                    className="ink-overlay"
+                    className={`ink-overlay ${tool === "review" ? "is-transparent" : ""}`}
                     onPointerDown={(e) => onOverlayPointerDown(e, n)}
                     onPointerMove={onOverlayPointerMove}
                     onPointerUp={(e) => onOverlayPointerUp(e, n)}

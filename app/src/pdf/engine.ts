@@ -1,5 +1,6 @@
 import * as pdfjs from "pdfjs-dist";
-import type { PDFDocumentProxy } from "pdfjs-dist";
+import { TextLayer } from "pdfjs-dist";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -55,4 +56,22 @@ export async function renderPage(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+}
+
+/** Render the invisible selectable text layer into a container. */
+export async function renderTextLayer(
+  page: PDFPageProxy,
+  container: HTMLDivElement,
+  cssWidth: number,
+): Promise<void> {
+  const baseVp = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: cssWidth / baseVp.width });
+  container.replaceChildren();
+  container.style.setProperty("--scale-factor", String(viewport.scale));
+  const tl = new TextLayer({
+    textContentSource: page.streamTextContent({ includeMarkedContent: false }),
+    container,
+    viewport,
+  });
+  await tl.render();
 }

@@ -417,13 +417,17 @@ export function SubTool({
   glyph,
   label,
   active = false,
+  onClickOverride,
+  title,
 }: {
   glyph: GlyphName;
   label: string;
   active?: boolean;
+  onClickOverride?: () => void;
+  title?: string;
 }) {
   return (
-    <button className={`subtool ${active ? "is-active" : ""}`}>
+    <button className={`subtool ${active ? "is-active" : ""}`} onClick={onClickOverride} title={title}>
       <Glyph name={glyph} size={17} />
       <span>{label}</span>
     </button>
