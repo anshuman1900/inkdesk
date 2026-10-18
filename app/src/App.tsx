@@ -19,6 +19,7 @@ export default function App() {
     touchDraw: false,
     layout: "continuous",
     radialOn: false,
+    darkHome: false,
   });
   const [showSettings, setShowSettings] = useState(false);
   const [showKit, setShowKit] = useState(
