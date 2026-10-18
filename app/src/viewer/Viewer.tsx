@@ -25,10 +25,12 @@ import {
   type ReviewStyle,
 } from "../lib/ink";
 import { loadAnns, putAnn, delAnn, syncOp } from "../lib/annDb";
+import { drawObject, bboxOf, translateAnn, pointInBBox, segIntersectsRect, imageCache, ensureImage } from "../lib/annRender";
+import { SignaturePad, TextEditor } from "./InsertEditors";
 
 type ToolId =
   | "pan" | "select" | "freeform" | "shapes" | "review"
-  | "measure" | "insert" | "library";
+  | "measure" | "insert" | "library" | "laser";
 
 const TOOLBAR: { id: ToolId; label: string; glyph?: GlyphName }[] = [
   { id: "pan", label: "", glyph: "pan" },
@@ -101,6 +103,15 @@ export default function Viewer({
   const [shapeDash, setShapeDash] = useState(false);
   const shapeRef = useRef<{ x0: number; y0: number; x1: number; y1: number; pts: number[][] } | null>(null);
   const [reviewStyle, setReviewStyle] = useState<ReviewStyle>("highlight");
+  const [insertMode, setInsertMode] = useState<null | "textbox" | "note" | "callout" | "image" | "signature" | "audio">(null);
+  const [editing, setEditing] = useState<{ page: number; x: number; y: number; cssW: number; value: string; kind: "textbox" | "note" | "callout"; tail?: [number, number] } | null>(null);
+  const [sigOpen, setSigOpen] = useState(false);
+  const [audioRec, setAudioRec] = useState<{ rec: MediaRecorder; chunks: Blob[]; x: number; y: number; page: number } | null>(null);
+  const [selectMode, setSelectMode] = useState<"rect" | "lasso">("rect");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const selDragRef = useRef<{ startIds: string[]; x0: number; y0: number; lastDx?: number; lastDy?: number } | null>(null);
+  const selShapeRef = useRef<{ x0: number; y0: number; x1: number; y1: number; pts: number[][] } | null>(null);
+  const laserRef = useRef<{ pts: [number, number, number][]; raf: number } | null>(null);
 
   const [base, setBase] = useState<{ w: number; h: number } | null>(null);
   const [scale, setScale] = useState(1);
@@ -166,7 +177,20 @@ export default function Viewer({
         const vp = p1.getViewport({ scale: 1 });
         setBase({ w: vp.width, h: vp.height });
         const anns = await loadAnns(meta.id).catch(() => []);
-        if (!cancelled) annStore.loadDoc(meta.id, anns);
+        if (!cancelled) {
+          annStore.loadDoc(meta.id, anns);
+          let pending = 0;
+          for (const a of anns) {
+            const src = (a.data?.src as string) ?? "";
+            if (src) {
+              pending++;
+              ensureImage(src, () => {
+                pending--;
+                if (pending === 0) setScale((v) => v); // trigger redraw
+              });
+            }
+          }
+        }
       } catch (e) {
         if (!cancelled) setErr(String(e));
       }
@@ -216,11 +240,26 @@ export default function Viewer({
         drawShape(ctx, ann.geometry as ShapeGeometry, ann.style, scale);
       } else if (ann.type === "text_review") {
         drawTextReview(ctx, ann.geometry as import("../lib/ink").ReviewGeometry, ann.style, scale);
+      } else {
+        drawObject(ctx, ann, scale, imageCache);
       }
     }
-  }, [base, scale, meta.id]);
+    // selection outlines
+    if (selected.size > 0) {
+      ctx.save();
+      ctx.strokeStyle = "#2f6bff";
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([5, 4]);
+      for (const ann of annStore.pageAnns(meta.id, n - 1)) {
+        if (!selected.has(ann.id)) continue;
+        const b = bboxOf(ann);
+        ctx.strokeRect(b.x * scale - 3, b.y * scale - 3, (b.w + 6) * scale, (b.h + 6) * scale);
+      }
+      ctx.restore();
+    }
+  }, [base, scale, meta.id, selected]);
 
-  // redraw all visible dry overlays on store/scale change
+  // redraw all visible dry overlays on store/scale/selection change
   useEffect(() => {
     for (const n of [...renderedRef.current]) redrawDry(n);
   }, [annStore.version, scale, redrawDry]);
@@ -276,6 +315,74 @@ export default function Viewer({
   }, [paintWet]);
 
   const shapeActive = () => tool === "shapes";
+
+  /* ---- editor → annotation commit ---- */
+  const saveEditor = (pageNum: number) => {
+    if (!editing || !editing.value.trim()) { setEditing(null); return; }
+    const now = Math.floor(Date.now() / 1000);
+    const ann: Annotation = {
+      id: uid(),
+      docId: meta.id,
+      page: pageNum - 1,
+      type: editing.kind === "note" ? "note" : editing.kind === "callout" ? "callout" : "textbox",
+      geometry: { x: editing.x / scale, y: editing.y / scale },
+      style: editing.kind === "note" ? { color: "#fff3a0", width: 2, opacity: 1 } : { color: "#1e1f24", width: 2, opacity: 1 },
+      data: {
+        text: editing.value,
+        fontSize: 14,
+        boxW: editing.cssW / scale,
+        tailX: editing.tail?.[0],
+        tailY: editing.tail?.[1],
+      },
+      z: Date.now() % 1e9,
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (editing.kind === "callout") ann.style.color = "#2f6bff";
+    annStore.add(ann);
+    void putAnn(ann).catch(() => {});
+    setEditing(null);
+  };
+
+  /* ---- selection actions ---- */
+  const deleteSelected = () => {
+    for (const id of selected) {
+      const a = annStore.getAnn(meta.id, id);
+      if (a) {
+        annStore.remove(a, true);
+        void delAnn(a.id).catch(() => {});
+      }
+    }
+    setSelected(new Set());
+  };
+
+  const reorderSelected = (dir: 1 | -1) => {
+    const pageNum = page - 1;
+    const pageAnns = annStore.pageAnns(meta.id, pageNum);
+    if (pageAnns.length === 0) return;
+    const zs = pageAnns.map((a) => a.z);
+    const target = dir === 1 ? Math.max(...zs) + 1 : Math.min(...zs) - 1;
+    for (const id of selected) {
+      const a = annStore.getAnn(meta.id, id);
+      if (a) {
+        const after = { ...a, z: target, updatedAt: Math.floor(Date.now() / 1000) };
+        annStore.update(after, true);
+        void putAnn(after).catch(() => {});
+      }
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (tool === "select" && (e.key === "Delete" || e.key === "Backspace") && selected.size > 0) {
+        e.preventDefault();
+        deleteSelected();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, selected, meta.id]);
 
   /* pen pressure clamped into a visible band — some tablets/drivers report 0 */
   const penPressure = (raw: number): number => {
@@ -358,6 +465,127 @@ export default function Viewer({
     const drawTool = toolRefDrawing();
     if (e.pointerType === "touch" && !touchWantsDraw) return; // let the browser pan/scroll
     if (!(isPen || isMouse || touchWantsDraw)) return;
+
+    // ---- insert placement ----
+    if (tool === "insert" && insertMode) {
+      e.preventDefault();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+      const now = Math.floor(Date.now() / 1000);
+      const mk = (partial: Partial<Annotation>): Annotation => ({
+        id: uid(), docId: meta.id, page: n - 1, type: "textbox",
+        geometry: { x, y }, style: { color: "#1e1f24", width: 2, opacity: 1 },
+        z: Date.now() % 1e9, createdAt: now, updatedAt: now, ...partial,
+      });
+      if (insertMode === "textbox" || insertMode === "note" || insertMode === "callout") {
+        setEditing({
+          page: n, x: e.clientX - rect.left, y: e.clientY - rect.top,
+          cssW: insertMode === "note" ? 170 : 260, value: "",
+          kind: insertMode,
+          tail: insertMode === "callout" ? [x, y] : undefined,
+        });
+        return;
+      }
+      if (insertMode === "image") {
+        const inp = document.createElement("input");
+        inp.type = "file";
+        inp.accept = "image/*";
+        inp.onchange = () => {
+          const f = inp.files?.[0];
+          if (!f) return;
+          const rd = new FileReader();
+          rd.onload = () => {
+            const src = String(rd.result);
+            ensureImage(src, () => {
+              const img = imageCache.get(src)!;
+              const cap = 340;
+              const r = Math.min(1, cap / Math.max(img.naturalWidth, img.naturalHeight));
+              const ann = mk({
+                type: "image",
+                geometry: { x, y, w: img.naturalWidth * r, h: img.naturalHeight * r },
+                data: { src },
+              });
+              annStore.add(ann);
+              void putAnn(ann).catch(() => {});
+            });
+          };
+          rd.readAsDataURL(f);
+        };
+        inp.click();
+        return;
+      }
+      if (insertMode === "signature") {
+        setSigOpen(true);
+        return;
+      }
+      if (insertMode === "audio") {
+        if (audioRec) { audioRec.rec.stop(); setAudioRec(null); return; }
+        void (async () => {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const rec = new MediaRecorder(stream);
+            const chunks: Blob[] = [];
+            rec.ondataavailable = (ev) => chunks.push(ev.data);
+            rec.onstop = () => {
+              stream.getTracks().forEach((t) => t.stop());
+              const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+              const rd = new FileReader();
+              rd.onload = () => {
+                const ann = mk({ type: "audio", geometry: { x, y }, data: { src: String(rd.result) } });
+                annStore.add(ann);
+                void putAnn(ann).catch(() => {});
+              };
+              rd.readAsDataURL(blob);
+            };
+            rec.start();
+            setAudioRec({ rec, chunks, x: e.clientX, y: e.clientY, page: n });
+          } catch (err) {
+            setErr("mic: " + String(err));
+          }
+        })();
+        return;
+      }
+    }
+
+    // ---- selection: start drag-select or move ----
+    if (tool === "select") {
+      e.preventDefault();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / scale;
+      const y = (e.clientY - rect.top) / scale;
+      // click inside an existing selection → move drag
+      const pageAnns = annStore.pageAnns(meta.id, n - 1);
+      const hitSelected = pageAnns.find((a) => selected.has(a.id) && pointInBBox(a, x, y, 8));
+      if (hitSelected && selected.size > 0) {
+        selDragRef.current = { startIds: [...selected], x0: x, y0: y };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        return;
+      }
+      // click on any annotation → select it alone
+      const hitAny = pageAnns.find((a) => pointInBBox(a, x, y, 6));
+      if (hitAny) {
+        setSelected(new Set([hitAny.id]));
+        selDragRef.current = { startIds: [hitAny.id], x0: x, y0: y };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        return;
+      }
+      // rubber-band select
+      setSelected(new Set());
+      selShapeRef.current = { x0: x, y0: y, x1: x, y1: y, pts: [[x, y]] };
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // ---- laser ----
+    if (tool === "laser") {
+      e.preventDefault();
+      const rect = e.currentTarget.getBoundingClientRect();
+      laserRef.current = { pts: [[e.clientX, e.clientY, performance.now()]], raf: 0 };
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      void rect;
+      return;
+    }
 
     // pen barrel button = eraser; drawing/erasing only when the Free-form pill is active
     const barrelErase = isPen && (e.buttons & 32) !== 0;
@@ -452,10 +680,59 @@ export default function Viewer({
 
   const onOverlayPointerUp = (e: React.PointerEvent<HTMLDivElement>, n: number) => {
     erasingRef.current = false;
-    if (e.pointerType === "touch" && panRef.current) {
-      panRef.current = null;
+
+    // laser: trail fades out via its own rAF loop
+    if (tool === "laser") {
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
       return;
     }
+
+    // selection rubber-band / lasso → compute selection
+    if (tool === "select" && selShapeRef.current) {
+      const shp = selShapeRef.current;
+      selShapeRef.current = null;
+      const wet = wetRefs.current.get(n);
+      wetRefs.current.get(n)?.getContext("2d")?.clearRect(0, 0, wet?.width ?? 0, wet?.height ?? 0);
+      const pageAnns = annStore.pageAnns(meta.id, n - 1);
+      const hit = new Set<string>();
+      for (const a of pageAnns) {
+        const b = bboxOf(a);
+        if (selectMode === "rect") {
+          const rx = Math.min(shp.x0, shp.x1), ry = Math.min(shp.y0, shp.y1);
+          const rw = Math.abs(shp.x1 - shp.x0), rh = Math.abs(shp.y1 - shp.y0);
+          if (b.x < rx + rw && b.x + b.w > rx && b.y < ry + rh && b.y + b.h > ry) hit.add(a.id);
+        } else {
+          const pts = shp.pts;
+          for (let i = 1; i < pts.length; i++) {
+            if (segIntersectsRect(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], b.x, b.y, b.w, b.h)) {
+              hit.add(a.id);
+              break;
+            }
+          }
+        }
+      }
+      setSelected(hit);
+      return;
+    }
+
+    // finish move-drag → persist final positions (single upd op per ann for undo)
+    if (tool === "select" && selDragRef.current) {
+      const drag = selDragRef.current;
+      selDragRef.current = null;
+      const dx = drag.lastDx ?? 0;
+      const dy = drag.lastDy ?? 0;
+      if (dx !== 0 || dy !== 0) {
+        for (const id of drag.startIds) {
+          const cur = annStore.getAnn(meta.id, id);
+          if (!cur) continue;
+          const final = translateAnn(cur, dx, dy);
+          annStore.update(final, true); // single undoable op
+          void putAnn(final).catch(() => {});
+        }
+      }
+      return;
+    }
+
     const shp = shapeRef.current;
     if (shp) {
       e.preventDefault();
@@ -597,6 +874,43 @@ export default function Viewer({
     setPage(Math.min(numPages, Math.floor(scroll.scrollTop / pageH) + 1));
     renderRange();
   }, [base, scale, numPages, layout, renderRange]);
+
+  /* laser trail: fade out over ~1.2s */
+  const scheduleLaser = useCallback(() => {
+    const L0 = laserRef.current;
+    if (!L0 || L0.raf) return;
+    L0.raf = requestAnimationFrame(() => {
+      const L = laserRef.current;
+      if (!L) { return; }
+      L.raf = 0;
+      const wet = wetRefs.current.get(page);
+      if (!wet) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+      const w = (base?.w ?? 0) * scale;
+      const h = (base?.h ?? 0) * scale;
+      const ctx = wet.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const now = performance.now();
+      const pts = L.pts.filter((p) => now - p[2] < 1200);
+      L.pts = pts;
+      for (let i = 1; i < pts.length; i++) {
+        const age = (now - pts[i][2]) / 1200;
+        ctx.globalAlpha = Math.max(0, 1 - age);
+        ctx.strokeStyle = "#ff4d4d";
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo((pts[i - 1][0] - (wet.getBoundingClientRect().left)) , pts[i - 1][1] - wet.getBoundingClientRect().top);
+        ctx.lineTo(pts[i][0] - wet.getBoundingClientRect().left, pts[i][1] - wet.getBoundingClientRect().top);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      if (pts.length > 0) scheduleLaser();
+      else laserRef.current = null;
+    });
+  }, [base, scale, page]);
 
   /* dev: 'r' opens radial at viewport center */
   useEffect(() => {
@@ -795,6 +1109,35 @@ export default function Viewer({
             </div>
           )}
 
+          {/* Insert expanded subrow */}
+          {tool === "insert" && (
+            <div className="subrow under-toolbar">
+              <SubTool glyph="text" label="Text" active={insertMode === "textbox"} onClickOverride={() => setInsertMode("textbox")} />
+              <SubTool glyph="sticky" label="Note" active={insertMode === "note"} onClickOverride={() => setInsertMode("note")} />
+              <SubTool glyph="callout" label="Callout" active={insertMode === "callout"} onClickOverride={() => setInsertMode("callout")} />
+              <SubTool glyph="image" label="Image" active={insertMode === "image"} onClickOverride={() => setInsertMode("image")} />
+              <SubTool glyph="flourish" label="Signature" active={insertMode === "signature"} onClickOverride={() => setInsertMode("signature")} />
+              <SubTool glyph="speaker" label={audioRec ? "Stop ●" : "Audio note"} active={!!audioRec} onClickOverride={() => setInsertMode("audio")} />
+              <span className="subrow__hint">
+                {insertMode ? "click on the page to place" : "pick an insert tool"}
+              </span>
+            </div>
+          )}
+
+          {/* Select expanded subrow */}
+          {tool === "select" && (
+            <div className="subrow under-toolbar">
+              <SubTool glyph="select" label="Rectangle" active={selectMode === "rect"} onClickOverride={() => setSelectMode("rect")} />
+              <SubTool glyph="scribble" label="Lasso" active={selectMode === "lasso"} onClickOverride={() => setSelectMode("lasso")} />
+              <span className="subrow__divider" />
+              <SubTool glyph="pen" label="Laser pointer" onClickOverride={() => setTool("laser")} />
+              <span className="subrow__divider" />
+              <SubTool glyph="shapes" label={"Fwd"} onClickOverride={() => reorderSelected(1)} title="Bring forward" />
+              <SubTool glyph="pen2" label={"Back"} onClickOverride={() => reorderSelected(-1)} title="Send backward" />
+              <SubTool glyph="eraser" label={`Delete (${selected.size})`} onClickOverride={deleteSelected} />
+            </div>
+          )}
+
           {/* free-form expanded subrow (colors + widths + eraser) */}
           {tool === "freeform" && (
             <div className="subrow under-toolbar">
@@ -833,6 +1176,18 @@ export default function Viewer({
                   <canvas className="dry-canvas" ref={(c) => { if (c) dryRefs.current.set(n, c); else dryRefs.current.delete(n); }} />
                   <canvas className="wet-canvas" ref={(c) => { if (c) wetRefs.current.set(n, c); else wetRefs.current.delete(n); }} />
                   <div className="textlayer" ref={(d) => { if (d) textRefs.current.set(n, d); else textRefs.current.delete(n); }} />
+                  {editing && editing.page === n && (
+                    <TextEditor
+                      x={editing.x} y={editing.y} width={editing.cssW}
+                      value={editing.value} isNote={editing.kind === "note"}
+                      onChange={(v) => setEditing({ ...editing, value: v })}
+                      onDone={() => saveEditor(n)}
+                      onCancel={() => setEditing(null)}
+                    />
+                  )}
+                  {audioRec && audioRec.page === n && (
+                    <span className="rec-chip">● recording — click Audio again to stop</span>
+                  )}
                   <div
                     className={`ink-overlay ${tool === "review" ? "is-transparent" : ""}`}
                     onPointerDown={(e) => onOverlayPointerDown(e, n)}
@@ -918,6 +1273,35 @@ export default function Viewer({
                 ]}
               />
             </div>
+          )}
+
+          {sigOpen && (
+            <SignaturePad
+              onSave={(url) => {
+                setSigOpen(false);
+                // place centered on the current page
+                if (!base) return;
+                const w = Math.min(190, base.w * 0.25);
+                const h = w * 0.45;
+                const now = Math.floor(Date.now() / 1000);
+                const ann: Annotation = {
+                  id: uid(),
+                  docId: meta.id,
+                  page: page - 1,
+                  type: "signature",
+                  geometry: { x: (base.w - w / scale) / 2, y: (base.h - h / scale) / 2, w: w / scale, h: h / scale },
+                  style: { color: "#0d131c", width: 2, opacity: 1 },
+                  data: { src: url },
+                  z: Date.now() % 1e9,
+                  createdAt: now,
+                  updatedAt: now,
+                };
+                ensureImage(url, () => annStore.version++);
+                annStore.add(ann);
+                void putAnn(ann).catch(() => {});
+              }}
+              onClose={() => setSigOpen(false)}
+            />
           )}
 
           {err && <div className="viewer__error">{err}</div>}

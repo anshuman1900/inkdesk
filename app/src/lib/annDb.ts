@@ -78,5 +78,7 @@ export async function syncOp(
   } else if (op.kind === "del") {
     if (inverse) await putAnn(op.ann);
     else await delAnn(op.ann.id);
+  } else if (op.kind === "upd") {
+    await putAnn(inverse ? op.before : op.after);
   }
 }

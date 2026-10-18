@@ -513,3 +513,29 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .ink-overlay.is-transparent ~ .textlayer { pointer-events: auto; }
 .textlayer { background: transparent !important; }
 .textlayer span { color: transparent; background: transparent !important; position: absolute; white-space: pre; cursor: text; transform-origin: 0 0; }
+
+/* ============ P14/P15: editor + selection UI ============ */
+
+.ink-texteditor {
+  position: absolute; z-index: 30; min-height: 44px;
+  background: rgba(255, 255, 255, 0.98); color: #1e1f24;
+  border: 2px solid var(--accent); border-radius: 4px;
+  font-family: "Segoe UI", system-ui, sans-serif; font-size: 14px;
+  padding: 6px 8px; resize: none; outline: none;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+}
+.ink-texteditor.is-note { background: #fff3a0; border-color: #d9c84a; }
+
+.rec-chip {
+  position: absolute; top: 8px; right: 8px; z-index: 30;
+  background: var(--danger); color: #fff; font-size: 11px; font-weight: 600;
+  border-radius: 999px; padding: 3px 10px;
+}
+
+.subrow__hint { font-size: 11px; color: var(--text-faint); margin-left: 8px; }
+.subrow__divider { width: 1px; height: 18px; background: var(--chrome-border); margin: 0 6px; }
+
+.sigpad {
+  width: 100%; border: 1px solid var(--chrome-border); border-radius: 8px;
+  touch-action: none; background: #fff; cursor: crosshair;
+}

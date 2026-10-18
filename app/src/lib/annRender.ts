@@ -66,6 +66,20 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return out;
 }
 
+/** shared image cache for image/signature annotations */
+export const imageCache = new Map<string, HTMLImageElement>();
+
+export function ensureImage(src: string, onLoad: () => void): HTMLImageElement {
+  let img = imageCache.get(src);
+  if (!img) {
+    img = new Image();
+    img.onload = onLoad;
+    img.src = src;
+    imageCache.set(src, img);
+  }
+  return img;
+}
+
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
