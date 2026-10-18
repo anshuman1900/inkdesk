@@ -256,33 +256,12 @@ export default function Viewer({
       };
       drawShape(ctx, g, { color: st.color, width: st.width, opacity: st.opacity, dash: shapeDash }, scale);
     } else {
-      // ink: draw ONLY the segments not yet painted — O(new points), never O(stroke)
-      const alpha = st.tool === "highlighter" ? 0.45 : st.opacity;
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = st.color;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      let i = cur.lastDrawn;
-      if (i === 0 && cur.pts.length === 1) {
-        // dot on tap
-        const [x, y, p] = cur.pts[0];
-        ctx.fillStyle = st.color;
-        ctx.beginPath();
-        ctx.arc(x * scale, y * scale, Math.max(0.5, (st.width * scale * (p || 0.5)) / 2), 0, Math.PI * 2);
-        ctx.fill();
-        cur.lastDrawn = 1;
-      }
-      for (; i < cur.pts.length - 1; i++) {
-        const [x0, y0, p0] = cur.pts[i];
-        const [x1, y1, p1] = cur.pts[i + 1];
-        if (Math.hypot(x1 - x0, y1 - y0) < 0.8) { cur.lastDrawn = i + 1; continue; }
-        ctx.beginPath();
-        ctx.lineWidth = Math.max(0.5, st.width * scale * ((p0 + p1) / 2 || 0.5));
-        ctx.moveTo(x0 * scale, y0 * scale);
-        ctx.lineTo(x1 * scale, y1 * scale);
-        ctx.stroke();
-        cur.lastDrawn = i + 1;
-      }
+      // full wet preview: clear + tapered outline of the current stroke
+      ctx.clearRect(0, 0, w, h);
+      const path = strokePath2D(cur.pts, st, scale, st.tool === "highlighter", !cur.isPen);
+      ctx.globalAlpha = st.tool === "highlighter" ? 0.45 : st.opacity;
+      ctx.fillStyle = st.color;
+      ctx.fill(path);
       ctx.globalAlpha = 1;
     }
     cur.dirty = false;
