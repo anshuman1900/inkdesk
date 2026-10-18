@@ -150,6 +150,10 @@ export default function App() {
             setActiveId(null);
             setPhase("home");
           }}
+          onReplaceTab={(oldId, m) => {
+            setDocs((prev) => prev.map((d) => (d.id === oldId ? m : d)));
+            setActiveId(m.id);
+          }}
         />
       )}
       {showSettings && (

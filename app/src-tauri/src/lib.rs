@@ -35,6 +35,33 @@ fn doc_register(path: String, registry: State<DocRegistry>) -> Result<String, St
     Ok(format!("{}:{}", id, meta.len()))
 }
 
+/// Write arbitrary bytes to a path (PDF pipeline output, exports).
+#[tauri::command]
+fn write_file(path: String, bytes: Vec<u8>) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("empty payload".into());
+    }
+    std::fs::write(&path, &bytes).map_err(|e| format!("{}: {}", path, e))?;
+    Ok(path)
+}
+
+#[tauri::command]
+fn file_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_file()
+}
+
+/// Open a file with the Windows print verb (flatten first, then call this).
+#[tauri::command]
+fn print_file(path: String) -> Result<(), String> {
+    let safe = path.replace('\'', "''");
+    let script = format!("Start-Process -FilePath '{}' -Verb Print", safe);
+    std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn run() {
     use tauri_plugin_sql::{Migration, MigrationKind};
 
@@ -54,7 +81,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .manage(DocRegistry::default())
-        .invoke_handler(tauri::generate_handler![doc_register])
+        .invoke_handler(tauri::generate_handler![doc_register, write_file, print_file, file_exists])
         // Stream registered PDF bytes into the webview: inkdesk://pdf/<id>
         .register_uri_scheme_protocol("inkdesk", |ctx, request| {
             let id = request

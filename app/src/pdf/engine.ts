@@ -75,3 +75,11 @@ export async function renderTextLayer(
   });
   await tl.render();
 }
+
+export async function pageText(doc: PDFDocumentProxy, pageNumber: number): Promise<string> {
+  const page = await doc.getPage(pageNumber);
+  const tc = await page.getTextContent();
+  return tc.items
+    .map((it) => ("str" in it ? (it as { str: string }).str : ""))
+    .join(" ");
+}

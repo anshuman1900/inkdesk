@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Database from "@tauri-apps/plugin-sql";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openFileByPath, type DocMeta } from "../lib/doc";
+import { createBlankDoc } from "../lib/pdfOps";
 
 export type { DocMeta };
 
@@ -18,6 +19,7 @@ export default function Home({ onOpen }: { onOpen: (m: DocMeta) => void }) {
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
   const [tab, setTab] = useState<"all" | "device" | "deleted">("all");
+  const [newDoc, setNewDoc] = useState<null | { pages: number; template: "blank" | "grid" | "lines" | "dots"; title: string }>(null);
 
   const refresh = () => {
     Database.load("sqlite:inkdesk.db")
@@ -126,7 +128,7 @@ export default function Home({ onOpen }: { onOpen: (m: DocMeta) => void }) {
           <button className="btn btn--accent" onClick={openDialog}>
             Open
           </button>
-          <button className="btn-plus" title="New blank document — arrives in P17" disabled>
+          <button className="btn-plus" title="New blank document" onClick={() => setNewDoc({ pages: 10, template: "lines", title: "Notes " + new Date().toLocaleDateString() })}>
             +
           </button>
         </div>
@@ -165,6 +167,67 @@ export default function Home({ onOpen }: { onOpen: (m: DocMeta) => void }) {
             </button>
           ))}
         </div>
+      {newDoc && (
+        <div className="modal-backdrop" onClick={() => setNewDoc(null)}>
+          <div className="modal modal--light" onClick={(e) => e.stopPropagation()}>
+            <div className="modal__head">
+              <h2 style={{ fontSize: 16, color: "#1b2530" }}>New note document</h2>
+              <button className="modal__close" onClick={() => setNewDoc(null)}>×</button>
+            </div>
+            <label className="newdoc-row">
+              <span>Title</span>
+              <input
+                className="home__search"
+                value={newDoc.title}
+                onChange={(e) => setNewDoc({ ...newDoc, title: e.target.value })}
+              />
+            </label>
+            <label className="newdoc-row">
+              <span>Pages</span>
+              <input
+                type="number" min={1} max={300} className="home__search" style={{ maxWidth: 110 }}
+                value={newDoc.pages}
+                onChange={(e) => setNewDoc({ ...newDoc, pages: Math.max(1, Math.min(300, Number(e.target.value) || 1)) })}
+              />
+            </label>
+            <div className="newdoc-row">
+              <span>Template</span>
+              <div className="seg seg--light">
+                {(["blank", "lines", "grid", "dots"] as const).map((t) => (
+                  <button key={t} className={newDoc.template === t ? "is-active" : ""} onClick={() => setNewDoc({ ...newDoc, template: t })}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="modal__foot">
+              <span style={{ fontSize: 11, color: "#64748b" }}>Saves to your Documents folder</span>
+              <button
+                className="btn btn--accent"
+                onClick={async () => {
+                  try {
+                    const path = await createBlankDoc({
+                      dir: "C:\\Users\\Administrator\\Documents",
+                      pages: newDoc.pages,
+                      size: [595, 842],
+                      color: { r: 1, g: 1, b: 1 },
+                      template: newDoc.template,
+                      title: newDoc.title,
+                    });
+                    setNewDoc(null);
+                    const r = await openFileByPath(path);
+                    if ("meta" in r) onOpen(r.meta);
+                  } catch (e2) {
+                    setError(String(e2));
+                  }
+                }}
+              >
+                Create & open
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </main>
     </div>
   );

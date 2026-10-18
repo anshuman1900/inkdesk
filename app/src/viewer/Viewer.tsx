@@ -27,6 +27,10 @@ import {
 import { loadAnns, putAnn, delAnn, syncOp } from "../lib/annDb";
 import { drawObject, bboxOf, translateAnn, pointInBBox, segIntersectsRect, imageCache, ensureImage } from "../lib/annRender";
 import { SignaturePad, TextEditor } from "./InsertEditors";
+import { PagesPanel, BookmarksPanel, SearchPanel, HistoryPanel, type Bookmark, type SearchHit } from "./Panels";
+import { applyPageOps, flattenDoc, textReviewExport, fetchDocBytes, writeBytes, editedPath } from "../lib/pdfOps";
+import { pageText } from "../pdf/engine";
+import Database from "@tauri-apps/plugin-sql";
 
 type ToolId =
   | "pan" | "select" | "freeform" | "shapes" | "review"
@@ -64,10 +68,11 @@ const MAX_DPR = 1.5;
 
 export default function Viewer({
   meta, tabs, night, layout, touchDraw, radialOn,
-  onSelectTab, onCloseTab, onAddTab, onToggleNight, onOpenSettings, onBack,
+  onSelectTab, onCloseTab, onAddTab, onToggleNight, onOpenSettings, onBack, onReplaceTab,
 }: {
   meta: DocMeta;
   tabs: DocMeta[];
+  onReplaceTab: (oldId: string, meta: DocMeta) => void;
   night: boolean;
   layout: "continuous" | "single";
   touchDraw: boolean;
@@ -112,6 +117,12 @@ export default function Viewer({
   const selDragRef = useRef<{ startIds: string[]; x0: number; y0: number; lastDx?: number; lastDy?: number } | null>(null);
   const selShapeRef = useRef<{ x0: number; y0: number; x1: number; y1: number; pts: number[][] } | null>(null);
   const laserRef = useRef<{ pts: [number, number, number][]; raf: number } | null>(null);
+  const [panel, setPanel] = useState<null | "pages" | "bookmarks" | "search" | "history">(null);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [searchHits, setSearchHits] = useState<SearchHit[] | null>(null);
+  const [searchedPages, setSearchedPages] = useState(0);
+  const [docMenu, setDocMenu] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const [base, setBase] = useState<{ w: number; h: number } | null>(null);
   const [scale, setScale] = useState(1);
@@ -176,6 +187,12 @@ export default function Viewer({
         const p1 = await handle.doc.getPage(1);
         const vp = p1.getViewport({ scale: 1 });
         setBase({ w: vp.width, h: vp.height });
+        const bmdb = await Database.load("sqlite:inkdesk.db");
+        const bms = await bmdb.select<Bookmark[]>(
+          "SELECT id, page_index, label FROM bookmarks WHERE document_id = $1 ORDER BY page_index",
+          [meta.id],
+        ).catch(() => []);
+        if (!cancelled) setBookmarks(bms);
         const anns = await loadAnns(meta.id).catch(() => []);
         if (!cancelled) {
           annStore.loadDoc(meta.id, anns);
@@ -875,6 +892,121 @@ export default function Viewer({
     renderRange();
   }, [base, scale, numPages, layout, renderRange]);
 
+  /* ---- pages apply (P16) ---- */
+  const applyPages = async (order: number[], rotations: Record<number, number>) => {
+    setBusy("Saving new copy…");
+    try {
+      const res = await applyPageOps(meta.id, meta.path, { order, rotations });
+      const title = res.newPath.replace(/\\/g, "/").split("/").pop() ?? res.newPath;
+      onReplaceTab(meta.id, { id: res.newId, path: res.newPath, title, sizeBytes: 0 });
+      setPanel(null);
+    } catch (e2) {
+      setErr(String(e2));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /* ---- bookmarks (P18) ---- */
+  const addBookmark = async () => {
+    const db = await Database.load("sqlite:inkdesk.db");
+    const id = uid();
+    await db.execute(
+      "INSERT INTO bookmarks (id, document_id, page_index, label) VALUES ($1, $2, $3, $4)",
+      [id, meta.id, page - 1, `Page ${page}`],
+    ).catch(() => {});
+    setBookmarks((b) => [...b, { id, page_index: page - 1, label: `Page ${page}` }]);
+  };
+  const removeBookmark = async (id: string) => {
+    const db = await Database.load("sqlite:inkdesk.db");
+    await db.execute("DELETE FROM bookmarks WHERE id = $1", [id]).catch(() => {});
+    setBookmarks((b) => b.filter((x) => x.id !== id));
+  };
+
+  /* ---- search (P18) ---- */
+  const runSearch = async (q: string) => {
+    if (!q.trim() || !pdfRef.current) return;
+    setBusy("Searching…");
+    const hits: SearchHit[] = [];
+    const n2 = pdfRef.current.doc.numPages;
+    for (let i = 1; i <= n2; i++) {
+      try {
+        const txt = (await pageText(pdfRef.current.doc, i)).toLowerCase();
+        const qi = q.toLowerCase();
+        let at = txt.indexOf(qi);
+        while (at >= 0 && hits.length < 60) {
+          hits.push({ page: i - 1, snippet: txt.slice(Math.max(0, at - 24), at + qi.length + 30) });
+          at = txt.indexOf(qi, at + qi.length);
+        }
+      } catch {
+        /* page without text layer */
+      }
+    }
+    setSearchedPages(n2);
+    setSearchHits(hits);
+    setBusy(null);
+  };
+
+  /* ---- doc menu actions (P20/P21) ---- */
+  const doFlatten = async () => {
+    setBusy("Flattening…");
+    try {
+      const anns = annStore.docAnns(meta.id);
+      const res = await flattenDoc(meta.id, meta.path, anns, { dpi: 150, suffix: "flattened" });
+      const title = res.path.replace(/\\/g, "/").split("/").pop() ?? res.path;
+      const res2 = await (await import("@tauri-apps/api/core")).invoke<string>("doc_register", { path: res.path });
+      onReplaceTab(meta.id, { id: res2.split(":")[0], path: res.path, title, sizeBytes: res.bytes });
+      setErr("");
+    } catch (e2) {
+      setErr("flatten: " + String(e2));
+    } finally {
+      setBusy(null);
+      setDocMenu(false);
+    }
+  };
+  const doSaveCopy = async () => {
+    setBusy("Saving copy…");
+    try {
+      const bytes = await fetchDocBytes(meta.id);
+      const p = editedPath(meta.path, "copy");
+      await writeBytes(p, bytes);
+      const title = p.replace(/\\/g, "/").split("/").pop() ?? p;
+      const res = await (await import("@tauri-apps/api/core")).invoke<string>("doc_register", { path: p });
+      onReplaceTab(meta.id, { id: res.split(":")[0], path: p, title, sizeBytes: Number(res.split(":")[1]) || bytes.length });
+    } catch (e2) {
+      setErr("save copy: " + String(e2));
+    } finally {
+      setBusy(null);
+      setDocMenu(false);
+    }
+  };
+  const doPrint = async () => {
+    setBusy("Flattening for print…");
+    try {
+      const anns = annStore.docAnns(meta.id);
+      const res = await flattenDoc(meta.id, meta.path, anns, { dpi: 150, suffix: "print" });
+      await (await import("@tauri-apps/api/core")).invoke("print_file", { path: res.path });
+    } catch (e2) {
+      setErr("print: " + String(e2));
+    } finally {
+      setBusy(null);
+      setDocMenu(false);
+    }
+  };
+  const doExportReview = async (fmt: "txt" | "csv") => {
+    try {
+      const data = textReviewExport(annStore.docAnns(meta.id));
+      const p2b = editedPath(meta.path, "text-review." + fmt);
+      const enc = new TextEncoder();
+      await writeBytes(p2b, enc.encode(fmt === "txt" ? data.txt : data.csv));
+      setErr("");
+    } catch (e2) {
+      setErr("export: " + String(e2));
+    } finally {
+      setDocMenu(false);
+    }
+  };
+
   /* laser trail: fade out over ~1.2s */
   const scheduleLaser = useCallback(() => {
     const L0 = laserRef.current;
@@ -1018,13 +1150,31 @@ export default function Viewer({
         <button className={`tabbar__icon ${night ? "is-active" : ""}`} onClick={onToggleNight} title="Night mode (M)">
           {night ? "☀" : "☾"}
         </button>
+        <button className="tabbar__icon" onClick={() => setPanel(panel === "search" ? null : "search")} title="Search">
+          <Glyph name="textreview" size={15} />
+        </button>
         <button className="tabbar__icon" onClick={onOpenSettings} title="Settings">
           <Glyph name="measure" size={15} />
         </button>
+        <div className="docmenu-wrap">
+          <button className="tabbar__icon" onClick={() => setDocMenu((v) => !v)} title="Document options">
+            <Glyph name="more" size={15} />
+          </button>
+          {docMenu && (
+            <div className="docmenu">
+              <button onClick={doSaveCopy}>Save as copy</button>
+              <button onClick={doFlatten}>Flatten annotations → new PDF</button>
+              <button onClick={doPrint}>Print (with markups)</button>
+              <button onClick={() => doExportReview("txt")}>Export text review .txt</button>
+              <button onClick={() => doExportReview("csv")}>Export text review .csv</button>
+            </div>
+          )}
+        </div>
         <span className="tabbar__meta">
           {numPages > 0 ? `${numPages} pages · ${(meta.sizeBytes / 1e6).toFixed(1)} MB` : "loading…"}
         </span>
       </div>
+      {busy && <div className="busy-chip">{busy}</div>}
 
       <div className="viewer__body">
         <div className="rail">
@@ -1039,7 +1189,12 @@ export default function Viewer({
           ))}
           <div className="rail__divider" />
           {RAIL_MID.map((r) => (
-            <button key={r.label} className="rail__btn" title={r.label}>
+            <button
+              key={r.label}
+              className="rail__btn"
+              title={r.label}
+              onClick={r.label === "Pages" ? () => setPanel(panel === "pages" ? null : "pages") : r.label === "Outline" ? () => setPanel(panel === "bookmarks" ? null : "bookmarks") : undefined}
+            >
               <Glyph name={r.glyph} size={18} />
             </button>
           ))}
@@ -1219,7 +1374,7 @@ export default function Viewer({
               <span>of {numPages || "…"}</span>
               <button onClick={() => goToPage(page + 1)} aria-label="next page">›</button>
               <span className="page-chip__divider" />
-              <button title="Pages grid — P16"><Glyph name="shapes" size={15} /></button>
+              <button title="Pages" onClick={() => setPanel(panel === "pages" ? null : "pages")}><Glyph name="shapes" size={15} /></button>
             </div>
             <div className="zoom-chip">
               <button onClick={() => setScale((s) => Math.max(0.25, s * 0.9))}>−</button>
@@ -1301,6 +1456,59 @@ export default function Viewer({
                 void putAnn(ann).catch(() => {});
               }}
               onClose={() => setSigOpen(false)}
+            />
+          )}
+
+          {panel === "pages" && pdfRef.current && (
+            <PagesPanel
+              doc={pdfRef.current.doc}
+              onClose={() => setPanel(null)}
+              onApply={applyPages}
+            />
+          )}
+          {panel === "bookmarks" && (
+            <BookmarksPanel
+              bookmarks={bookmarks}
+              onGo={(p3) => goToPage(p3)}
+              onAdd={addBookmark}
+              onRemove={removeBookmark}
+              onClose={() => setPanel(null)}
+            />
+          )}
+          {panel === "search" && (
+            <div className="search-wrap">
+              <input
+                className="home__search"
+                placeholder="Search in document…"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void runSearch((e.target as HTMLInputElement).value);
+                }}
+              />
+              {searchHits !== null && (
+                <SearchPanel
+                  hits={searchHits}
+                  total={searchedPages}
+                  onGo={(p3) => goToPage(p3)}
+                  onClose={() => { setPanel(null); setSearchHits(null); }}
+                />
+              )}
+            </div>
+          )}
+          {panel === "history" && (
+            <HistoryPanel
+              entries={annStore
+                .docAnns(meta.id)
+                .map((a) => ({ id: a.id, type: a.type, page: a.page, at: a.createdAt }))
+                .sort((a, b) => b.at - a.at)}
+              onJump={(p3) => goToPage(p3)}
+              onDelete={(id) => {
+                const a = annStore.getAnn(meta.id, id);
+                if (a) {
+                  annStore.remove(a, true);
+                  void delAnn(a.id).catch(() => {});
+                }
+              }}
+              onClose={() => setPanel(null)}
             />
           )}
 
