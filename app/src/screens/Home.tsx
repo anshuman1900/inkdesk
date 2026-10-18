@@ -14,7 +14,7 @@ type Row = {
   last_opened_at: number;
 };
 
-export default function Home({ onOpen }: { onOpen: (m: DocMeta) => void }) {
+export default function Home({ onOpen, darkHome = false }: { onOpen: (m: DocMeta) => void; darkHome?: boolean }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [filter, setFilter] = useState("");
   const [error, setError] = useState("");
@@ -97,7 +97,7 @@ export default function Home({ onOpen }: { onOpen: (m: DocMeta) => void }) {
     b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`;
 
   return (
-    <div className="home">
+    <div className={`home ${darkHome ? "home--dark" : ""}`}>
       <aside className="home__side">
         <div className="home__brand">
           <span className="logo-dot" />

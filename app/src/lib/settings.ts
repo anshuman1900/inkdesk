@@ -4,12 +4,14 @@ export interface UiSettings {
   touchDraw: boolean; // false = touch pans (palm rejection), true = touch draws
   layout: "continuous" | "single";
   radialOn: boolean; // honored in P9
+  darkHome: boolean; // home screen dark mode (market fix #3)
 }
 
 export const DEFAULTS: UiSettings = {
   touchDraw: false,
   layout: "continuous",
   radialOn: false,
+  darkHome: false,
 };
 
 const KEY = "ui";

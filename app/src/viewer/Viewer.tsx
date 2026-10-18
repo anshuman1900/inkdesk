@@ -94,6 +94,8 @@ export default function Viewer({
   const pdfRef = useRef<PDFHandle | null>(null);
   const t0Ref = useRef<number>(performance.now());
   const fittedRef = useRef(false);
+  const pageRef = useRef(1);
+  const scaleRef = useRef(1);
   const historyRef = useRef<{ stack: number[]; idx: number }>({ stack: [1], idx: 0 });
 
   // active drawing state
@@ -132,8 +134,10 @@ export default function Viewer({
 
   const [base, setBase] = useState<{ w: number; h: number } | null>(null);
   const [scale, setScale] = useState(1);
+  scaleRef.current = scale;
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
+  pageRef.current = page;
   const [tool, setTool] = useState<ToolId>("pan");
   const [flyoutOpen, setFlyoutOpen] = useState(false);
   const [firstPaint, setFirstPaint] = useState<number | null>(null);
@@ -193,6 +197,34 @@ export default function Viewer({
         const p1 = await handle.doc.getPage(1);
         const vp = p1.getViewport({ scale: 1 });
         setBase({ w: vp.width, h: vp.height });
+        // P25: instant low-res first paint before fit-width full render lands
+        const c1 = canvasRefs.current.get(1);
+        if (c1) {
+          const lo = p1.getViewport({ scale: 0.28 });
+          c1.width = Math.floor(lo.width);
+          c1.height = Math.floor(lo.height);
+          c1.style.width = "100%";
+          c1.style.height = "100%";
+          await p1.render({ canvas: c1, canvasContext: c1.getContext("2d")!, viewport: lo }).promise.catch(() => {});
+        }
+        // P28: restore persisted per-doc state (zoom/last page)
+        try {
+          const db = await Database.load("sqlite:inkdesk.db");
+          const st = await db.select<{ last_page: number; zoom_state: string | null }[]>(
+            "SELECT last_page, zoom_state FROM documents WHERE id = $1",
+            [meta.id],
+          );
+          if (st.length > 0) {
+            const lp = st[0].last_page;
+            if (lp > 1 && lp <= handle.doc.numPages) setTimeout(() => goToPageRef.current?.(lp, false), 60);
+            if (st[0].zoom_state) {
+              const z = JSON.parse(st[0].zoom_state) as { mode: string; value?: number };
+              if (z.mode === "percent" && z.value) setTimeout(() => setScale(z.value! / 100), 80);
+            }
+          }
+        } catch {
+          /* state restore best-effort */
+        }
         const bmdb = await Database.load("sqlite:inkdesk.db");
         const bms = await bmdb.select<Bookmark[]>(
           "SELECT id, page_index, label FROM bookmarks WHERE document_id = $1 ORDER BY page_index",
@@ -228,6 +260,18 @@ export default function Viewer({
     })();
     return () => {
       cancelled = true;
+      // P28: persist last page + zoom on document close
+      void (async () => {
+        try {
+          const db = await Database.load("sqlite:inkdesk.db");
+          await db.execute(
+            "UPDATE documents SET last_page = $1, zoom_state = $2 WHERE id = $3",
+            [pageRef.current, JSON.stringify({ mode: "percent", value: Math.round(scaleRef.current * 100) }), meta.id],
+          );
+        } catch {
+          /* best-effort */
+        }
+      })();
       pdfRef.current?.destroy().catch(() => {});
       pdfRef.current = null;
     };
@@ -1284,6 +1328,7 @@ export default function Viewer({
     };
   }, [tool]);
 
+  const goToPageRef = useRef<((n: number, push?: boolean) => void) | null>(null);
   const goToPage = (n: number, pushHistory = true) => {
     const scroll = scrollRef.current;
     if (!scroll || !base) return;
@@ -1297,6 +1342,8 @@ export default function Viewer({
       h.idx = h.stack.length - 1;
     }
   };
+
+  goToPageRef.current = goToPage;
 
   const historyJump = (dir: -1 | 1) => {
     const h = historyRef.current;

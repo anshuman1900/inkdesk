@@ -62,6 +62,22 @@ export default function SettingsModal({
         </section>
 
         <section className="modal__section">
+          <h3>Appearance</h3>
+          <label className="toggle">
+            <span>Dark home screen</span>
+            <span
+              className={`toggle__track ${local.darkHome ? "is-on" : ""}`}
+              onClick={(e) => {
+                e.preventDefault();
+                update({ darkHome: !local.darkHome });
+              }}
+            >
+              <span className="toggle__thumb" />
+            </span>
+          </label>
+        </section>
+
+        <section className="modal__section">
           <h3>Input</h3>
           <label className="toggle">
             <span>Touch draws (off = touch pans, pen always draws)</span>

@@ -629,3 +629,18 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
   height: 30px; border-radius: 7px; border: 1px solid var(--chrome-border);
   background: var(--chrome-raised); color: var(--text); font-size: 12px; padding: 0 8px;
 }
+
+/* market fix #3: dark home */
+.home--dark { background: var(--chrome); color: var(--text); }
+.home--dark .home__side { background: var(--chrome-raised); border-color: var(--chrome-border); }
+.home--dark .home__navitem { color: var(--text); }
+.home--dark .home__navitem.is-active { background: var(--chrome-active); }
+.home--dark .home__navitem .count { color: var(--text-muted); }
+.home--dark .home__search { background: var(--chrome-deep); border-color: var(--chrome-border); color: var(--text); }
+.home--dark .home__table { background: var(--chrome-raised); border-color: var(--chrome-border); }
+.home--dark .home__thead { color: var(--text-muted); border-color: var(--chrome-border); }
+.home--dark .home__row { background: var(--chrome-raised); border-color: var(--chrome-border); }
+.home--dark .home__row:hover { background: var(--chrome-active); }
+.home--dark .home__docname { color: var(--text); }
+.home--dark .home__dim { color: var(--text-muted); }
+.home--dark .home__empty { color: var(--text-muted); }
