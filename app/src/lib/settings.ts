@@ -3,18 +3,18 @@ import Database from "@tauri-apps/plugin-sql";
 export interface UiSettings {
   touchDraw: boolean; // false = touch pans (palm rejection), true = touch draws
   layout: "continuous" | "single";
-  radialOn: boolean; // honored in P9
+  radialOn: boolean; // right-click radial menu — ON by default (Drawboard parity)
   darkHome: boolean; // home screen dark mode (market fix #3)
 }
 
 export const DEFAULTS: UiSettings = {
   touchDraw: false,
   layout: "continuous",
-  radialOn: false,
+  radialOn: true,
   darkHome: false,
 };
 
-const KEY = "ui";
+const KEY = "ui2"; // bumped: radial now defaults on
 
 export async function loadSettings(): Promise<UiSettings> {
   try {

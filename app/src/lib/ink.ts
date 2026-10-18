@@ -220,10 +220,20 @@ class AnnStore {
   /** hit-test ink strokes AND shapes: delete the topmost within r of page-space point */
   eraseAt(docId: string, page: number, x: number, y: number, r: number): Annotation | null {
     const list = this.pageAnns(docId, page).filter(
-      (a) => a.type === "ink" || a.type === "highlighter" || a.type === "shape",
+      (a) => a.type === "ink" || a.type === "highlighter" || a.type === "shape" || a.type === "text_review",
     );
     for (let i = list.length - 1; i >= 0; i--) {
       const ann = list[i];
+      if (ann.type === "text_review") {
+        const rects = (ann.geometry as ReviewGeometry).rects;
+        for (const [rx, ry, rw, rh] of rects) {
+          if (x >= rx - r && x <= rx + rw + r && y >= ry - r && y <= ry + rh + r) {
+            this.remove(ann);
+            return ann;
+          }
+        }
+        continue;
+      }
       if (ann.type === "shape") {
         const pts = shapeStrokePoints(ann.geometry as ShapeGeometry);
         for (const [px, py] of pts) {

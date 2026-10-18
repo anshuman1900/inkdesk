@@ -96,7 +96,7 @@ export default function SettingsModal({
         <section className="modal__section">
           <h3>Tools</h3>
           <label className="toggle">
-            <span>Use radial menu (arrives in P9)</span>
+            <span>Use radial menu (right-click on the page)</span>
             <span
               className={`toggle__track ${local.radialOn ? "is-on" : ""}`}
               onClick={(e) => {

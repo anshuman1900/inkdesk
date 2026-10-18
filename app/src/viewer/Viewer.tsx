@@ -102,7 +102,7 @@ export default function Viewer({
   const [toolState, setToolState] = useState<ToolState>({ ...DEFAULT_TOOL });
   const toolRef = useRef<ToolState>(toolState);
   toolRef.current = toolState;
-  const strokeRef = useRef<{ pts: number[][]; dirty: boolean; isPen: boolean; lastDrawn: number } | null>(null);
+  const strokeRef = useRef<{ pts: number[][]; dirty: boolean; isPen: boolean; lastDrawn: number; page: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
   const erasingRef = useRef(false);
   const rafRef = useRef(0);
@@ -386,7 +386,7 @@ export default function Viewer({
   const paintWet = useCallback(() => {
     const cur = strokeRef.current;
     if (!cur) return;
-    const n = page;
+    const n = cur.page; // the page the stroke is on — not the viewport state
     const wet = wetRefs.current.get(n);
     if (!wet || !base) return;
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
@@ -402,6 +402,28 @@ export default function Viewer({
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const st = toolRef.current;
+    if (selShapeRef.current) {
+      // selection rubber band / lasso preview
+      ctx.clearRect(0, 0, w, h);
+      const b = selShapeRef.current;
+      ctx.strokeStyle = "#2f6bff";
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([6, 4]);
+      if (selectMode === "rect") {
+        ctx.strokeRect(
+          Math.min(b.x0, b.x1) * scale, Math.min(b.y0, b.y1) * scale,
+          Math.abs(b.x1 - b.x0) * scale, Math.abs(b.y1 - b.y0) * scale,
+        );
+      } else if (b.pts.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(b.pts[0][0] * scale, b.pts[0][1] * scale);
+        for (const [x, y] of b.pts) ctx.lineTo(x * scale, y * scale);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      cur.dirty = false;
+      return;
+    }
     if (shapeRef.current) {
       // shapes: rebuild preview (cheap, few points)
       ctx.clearRect(0, 0, w, h);
@@ -597,9 +619,13 @@ export default function Viewer({
         z: Date.now() % 1e9, createdAt: now, updatedAt: now, ...partial,
       });
       if (insertMode === "textbox" || insertMode === "note" || insertMode === "callout") {
+        const off = insertMode === "callout" ? { dx: 70, dy: -95 } : { dx: 0, dy: 0 };
         setEditing({
-          page: n, x: e.clientX - rect.left, y: e.clientY - rect.top,
-          cssW: insertMode === "note" ? 170 : 260, value: "",
+          page: n,
+          x: Math.max(4, e.clientX - rect.left + off.dx),
+          y: Math.max(4, e.clientY - rect.top + off.dy),
+          cssW: insertMode === "note" ? 170 : 260,
+          value: "",
           kind: insertMode,
           tail: insertMode === "callout" ? [x, y] : undefined,
         });
@@ -872,6 +898,7 @@ export default function Viewer({
       dirty: true,
       isPen,
       lastDrawn: 0,
+      page: n,
     };
     scheduleWet();
   };
@@ -1008,7 +1035,7 @@ export default function Viewer({
     if (!cur) return;
     e.preventDefault();
     strokeRef.current = null;
-    const wet = wetRefs.current.get(n);
+    const wet = wetRefs.current.get(cur.page);
     const wctx = wet?.getContext("2d");
     if (wctx && wet) wctx.clearRect(0, 0, wet.width, wet.height);
     if (cur.pts.length < 2) return; // tap = ignore for now
@@ -1390,6 +1417,7 @@ export default function Viewer({
           <button className="tabbar__icon" onClick={() => setDocMenu((v) => !v)} title="Document options">
             <Glyph name="more" size={15} />
           </button>
+          {docMenu && <div className="docmenu-backdrop" onClick={() => setDocMenu(false)} />}
           {docMenu && (
             <div className="docmenu">
               <button onClick={doSaveCopy}>Save as copy</button>
@@ -1597,7 +1625,7 @@ export default function Viewer({
           <div ref={scrollRef} className={`canvas-scroll ${tool === "pan" ? "is-pan" : ""}`} onScroll={onScroll}>
             <div className={`pages ${night ? "night" : ""}`} style={{ width: pageW || undefined }}>
               {shownPages.map((n) => (
-                <div key={n} className="page-slot" style={{ height: pageH || 400, marginTop: n === 1 ? 24 : 0 }}>
+                <div key={n} className={`page-slot ${tool === "review" ? "reviewing" : ""}`} style={{ height: pageH || 400, marginTop: n === 1 ? 24 : 0 }}>
                   <canvas ref={(c) => { if (c) canvasRefs.current.set(n, c); else canvasRefs.current.delete(n); }} />
                   <canvas className="dry-canvas" ref={(c) => { if (c) dryRefs.current.set(n, c); else dryRefs.current.delete(n); }} />
                   <canvas className="wet-canvas" ref={(c) => { if (c) wetRefs.current.set(n, c); else wetRefs.current.delete(n); }} />
