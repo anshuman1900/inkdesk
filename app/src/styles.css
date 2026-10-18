@@ -445,3 +445,32 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .modal__muted { color: var(--text-muted); font-size: 12px; margin: 4px 0 0; }
 .modal__foot { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+
+/* ============ P7 ink layers ============ */
+
+.page-slot { position: relative; }
+
+.page-slot canvas:first-child { display: block; }
+
+.dry-canvas, .wet-canvas {
+  position: absolute; inset: 0; pointer-events: none;
+}
+
+.ink-overlay {
+  position: absolute; inset: 0;
+  touch-action: pan-x pan-y;   /* touch pans unless touchDraw */
+  z-index: 5;
+}
+
+.pages.night .ink-overlay { z-index: 5; }
+
+.subrow.under-toolbar {
+  position: relative; z-index: 6;
+  margin: 6px 12px 0;
+  border-radius: 10px;
+  background: var(--chrome);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+.pages.night .dry-canvas,
+.pages.night .wet-canvas { filter: inherit; }

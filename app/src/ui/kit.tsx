@@ -427,15 +427,18 @@ export function SubTool({
 export function ColorChip({
   color,
   selected = false,
+  onClickOverride,
 }: {
   color: string;
   selected?: boolean;
+  onClickOverride?: () => void;
 }) {
   return (
     <button
       className={`color-chip ${selected ? "is-selected" : ""}`}
       style={{ background: color } as CSSProperties}
       aria-label={`color ${color}`}
+      onClick={onClickOverride}
     />
   );
 }
@@ -444,13 +447,15 @@ export function WidthPreview({
   width,
   label,
   selected = false,
+  onClickOverride,
 }: {
   width: number;
   label: string;
   selected?: boolean;
+  onClickOverride?: () => void;
 }) {
   return (
-    <button className={`width-preview ${selected ? "is-selected" : ""}`}>
+    <button className={`width-preview ${selected ? "is-selected" : ""}`} onClick={onClickOverride}>
       <svg width="26" height="12" viewBox="0 0 26 12" aria-hidden>
         <path
           d="M1 6q3-5 6.5 0t6.5 0 6.5 0 4.5 0"
