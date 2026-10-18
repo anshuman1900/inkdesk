@@ -93,7 +93,7 @@ export default function Viewer({
   const [toolState, setToolState] = useState<ToolState>({ ...DEFAULT_TOOL });
   const toolRef = useRef<ToolState>(toolState);
   toolRef.current = toolState;
-  const strokeRef = useRef<{ pts: number[][]; dirty: boolean; isPen: boolean } | null>(null);
+  const strokeRef = useRef<{ pts: number[][]; dirty: boolean; isPen: boolean; lastDrawn: number } | null>(null);
   const panRef = useRef<{ x: number; y: number; sl: number; st: number } | null>(null);
   const erasingRef = useRef(false);
   const rafRef = useRef(0);
@@ -225,7 +225,7 @@ export default function Viewer({
     for (const n of [...renderedRef.current]) redrawDry(n);
   }, [annStore.version, scale, redrawDry]);
 
-  /* ---- wet stroke painting (current stroke only, rAF-throttled) ---- */
+  /* ---- wet stroke painting: INCREMENTAL (only new segments per frame) ---- */
   const paintWet = useCallback(() => {
     const cur = strokeRef.current;
     if (!cur) return;
@@ -244,19 +244,45 @@ export default function Viewer({
     const ctx = wet.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
     const st = toolRef.current;
     if (shapeRef.current) {
-      const g: ShapeGeometry =
-        shapeRef.current.pts.length > 0
-          ? { kind: shapeKind, x0: shapeRef.current.x0, y0: shapeRef.current.y0, x1: shapeRef.current.x1, y1: shapeRef.current.y1, pts: shapeRef.current.pts }
-          : { kind: shapeKind, x0: shapeRef.current.x0, y0: shapeRef.current.y0, x1: shapeRef.current.x1, y1: shapeRef.current.y1 };
+      // shapes: rebuild preview (cheap, few points)
+      ctx.clearRect(0, 0, w, h);
+      const g: ShapeGeometry = {
+        kind: shapeKind,
+        x0: shapeRef.current.x0, y0: shapeRef.current.y0,
+        x1: shapeRef.current.x1, y1: shapeRef.current.y1,
+        pts: shapeRef.current.pts,
+      };
       drawShape(ctx, g, { color: st.color, width: st.width, opacity: st.opacity, dash: shapeDash }, scale);
     } else {
-      const path = strokePath2D(cur.pts, st, scale, st.tool === "highlighter", !cur.isPen);
-      ctx.globalAlpha = st.tool === "highlighter" ? 0.45 : st.opacity;
-      ctx.fillStyle = st.color;
-      ctx.fill(path);
+      // ink: draw ONLY the segments not yet painted — O(new points), never O(stroke)
+      const alpha = st.tool === "highlighter" ? 0.45 : st.opacity;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = st.color;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      let i = cur.lastDrawn;
+      if (i === 0 && cur.pts.length === 1) {
+        // dot on tap
+        const [x, y, p] = cur.pts[0];
+        ctx.fillStyle = st.color;
+        ctx.beginPath();
+        ctx.arc(x * scale, y * scale, Math.max(0.5, (st.width * scale) / 2), 0, Math.PI * 2);
+        ctx.fill();
+        cur.lastDrawn = 1;
+      }
+      for (; i < cur.pts.length - 1; i++) {
+        const [x0, y0, p0] = cur.pts[i];
+        const [x1, y1, p1] = cur.pts[i + 1];
+        if (Math.hypot(x1 - x0, y1 - y0) < 0.8) { cur.lastDrawn = i + 1; continue; }
+        ctx.beginPath();
+        ctx.lineWidth = Math.max(0.5, st.width * scale * ((p0 + p1) / 2 || 0.5));
+        ctx.moveTo(x0 * scale, y0 * scale);
+        ctx.lineTo(x1 * scale, y1 * scale);
+        ctx.stroke();
+        cur.lastDrawn = i + 1;
+      }
       ctx.globalAlpha = 1;
     }
     cur.dirty = false;
@@ -405,6 +431,7 @@ export default function Viewer({
       pts: [[px, py, pressure]],
       dirty: true,
       isPen,
+      lastDrawn: 0,
     };
     scheduleWet();
   };
