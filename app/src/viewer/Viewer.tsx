@@ -268,7 +268,7 @@ export default function Viewer({
         const [x, y, p] = cur.pts[0];
         ctx.fillStyle = st.color;
         ctx.beginPath();
-        ctx.arc(x * scale, y * scale, Math.max(0.5, (st.width * scale) / 2), 0, Math.PI * 2);
+        ctx.arc(x * scale, y * scale, Math.max(0.5, (st.width * scale * (p || 0.5)) / 2), 0, Math.PI * 2);
         ctx.fill();
         cur.lastDrawn = 1;
       }
