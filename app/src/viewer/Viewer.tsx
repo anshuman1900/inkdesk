@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { openPdf, renderPage, renderTextLayer, type PDFHandle } from "../pdf/engine";
 import type { DocMeta } from "../screens/Home";
 import {
@@ -27,6 +27,7 @@ import {
 import { loadAnns, putAnn, delAnn, syncOp } from "../lib/annDb";
 import { drawObject, bboxOf, translateAnn, pointInBBox, segIntersectsRect, imageCache, ensureImage } from "../lib/annRender";
 import { SignaturePad, TextEditor } from "./InsertEditors";
+import SnipOverlay from "./SnipOverlay";
 import { PagesPanel, BookmarksPanel, SearchPanel, HistoryPanel, type Bookmark, type SearchHit } from "./Panels";
 import { applyPageOps, flattenDoc, textReviewExport, fetchDocBytes, writeBytes, editedPath } from "../lib/pdfOps";
 import { pageText } from "../pdf/engine";
@@ -131,6 +132,7 @@ export default function Viewer({
   const [searchedPages, setSearchedPages] = useState(0);
   const [docMenu, setDocMenu] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [snip, setSnip] = useState<{ imagePath: string } | null>(null);
 
   const [base, setBase] = useState<{ w: number; h: number } | null>(null);
   const [scale, setScale] = useState(1);
@@ -1390,8 +1392,15 @@ export default function Viewer({
     const scroll = scrollRef.current;
     if (!scroll || !base) return;
     const clamped = Math.min(Math.max(1, n), numPages);
-    if (layout === "single") setPage(clamped);
-    else scroll.scrollTop = (clamped - 1) * (base.h * scale + PAGE_GAP);
+    if (layout === "single") {
+      setPage(clamped);
+    } else {
+      // measure the real slot offset — immune to margins/padding drift
+      const slots = scroll.querySelectorAll<HTMLElement>(".page-slot");
+      const el = slots[clamped - 1];
+      if (el) scroll.scrollTop = Math.max(0, el.offsetTop - scroll.offsetTop - 14);
+      else scroll.scrollTop = (clamped - 1) * (base.h * scale + PAGE_GAP);
+    }
     if (pushHistory) {
       const h = historyRef.current;
       h.stack = h.stack.slice(0, h.idx + 1);
@@ -1436,6 +1445,23 @@ export default function Viewer({
         <div className="tabbar__spacer" />
         <button className={`tabbar__icon ${night ? "is-active" : ""}`} onClick={onToggleNight} title="Night mode (M)">
           {night ? "☀" : "☾"}
+        </button>
+        <button
+          className="tabbar__icon"
+          title="Snip — screenshot a region (inserts into this page)"
+          onClick={() => {
+            void (async () => {
+              try {
+                const tmp = `C:\\Users\\Administrator\\AppData\\Local\\Temp\\inkdesk-snip-${Date.now()}.png`;
+                const p4 = await invoke<string>("snip_capture", { tempPath: tmp });
+                setSnip({ imagePath: p4 });
+              } catch (e2) {
+                setErr("snip: " + String(e2));
+              }
+            })();
+          }}
+        >
+          <Glyph name="snapshot" size={15} />
         </button>
         <button className="tabbar__icon" onClick={() => setPanel(panel === "search" ? null : "search")} title="Search">
           <Glyph name="textreview" size={15} />
@@ -1757,6 +1783,43 @@ export default function Viewer({
                 ]}
               />
             </div>
+          )}
+
+          {snip && (
+            <SnipOverlay
+              imagePath={snip.imagePath}
+              onDone={(result) => {
+                setSnip(null);
+                if (!result || !base) return;
+                // copy to clipboard
+                void (async () => {
+                  try {
+                    const blob = await (await fetch(result.dataUrl)).blob();
+                    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+                  } catch {
+                    /* clipboard may be restricted — the insert still works */
+                  }
+                })();
+                const w2 = Math.min(340, base.w * 0.45);
+                const h2 = w2 * 0.6;
+                const now = Math.floor(Date.now() / 1000);
+                const ann: Annotation = {
+                  id: uid(),
+                  docId: meta.id,
+                  page: page - 1,
+                  type: "image",
+                  geometry: { x: (base.w - w2 / scale) / 2, y: (base.h - h2 / scale) / 2, w: w2 / scale, h: h2 / scale },
+                  style: { color: "#0d131c", width: 1, opacity: 1 },
+                  data: { src: result.dataUrl },
+                  z: Date.now() % 1e9,
+                  createdAt: now,
+                  updatedAt: now,
+                };
+                ensureImage(result.dataUrl, () => annStore.version++);
+                annStore.add(ann);
+                void putAnn(ann).catch(() => {});
+              }}
+            />
           )}
 
           {sigOpen && (

@@ -45,6 +45,38 @@ fn write_file(path: String, bytes: Vec<u8>) -> Result<String, String> {
     Ok(path)
 }
 
+/// Snipping tool capture: minimize the app, screenshot the virtual screen, restore.
+/// Returns raw PNG bytes (base64 handled on the JS side or written to a temp file).
+#[tauri::command]
+fn snip_capture(app: tauri::AppHandle, temp_path: String) -> Result<String, String> {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.minimize();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(450));
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($b.X, $b.Y, 0, 0, $b.Size)
+$bmp.Save('PATH', [System.Drawing.Imaging.ImageFormat]::Png)
+$g.Dispose(); $bmp.Dispose()
+"#.replace("PATH", &temp_path.replace(''', "''"));
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.maximize();
+        let _ = w.set_focus();
+    }
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).to_string());
+    }
+    Ok(temp_path)
+}
+
 #[tauri::command]
 fn file_exists(path: String) -> bool {
     std::path::Path::new(&path).is_file()
@@ -81,7 +113,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .manage(DocRegistry::default())
-        .invoke_handler(tauri::generate_handler![doc_register, write_file, print_file, file_exists])
+        .invoke_handler(tauri::generate_handler![doc_register, write_file, print_file, file_exists, snip_capture])
         // Stream registered PDF bytes into the webview: inkdesk://pdf/<id>
         .register_uri_scheme_protocol("inkdesk", |ctx, request| {
             let id = request
