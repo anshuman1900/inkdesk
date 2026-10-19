@@ -111,6 +111,7 @@ export default function Viewer({
   const [shapeDash, setShapeDash] = useState(false);
   const shapeRef = useRef<{ x0: number; y0: number; x1: number; y1: number; pts: number[][] } | null>(null);
   const [reviewStyle, setReviewStyle] = useState<ReviewStyle>("highlight");
+  const [widthOpen, setWidthOpen] = useState(false);
   const [insertMode, setInsertMode] = useState<null | "textbox" | "note" | "callout" | "image" | "signature" | "audio" | "link" | "redact" | "redact-drag" | `stamp:${string}`>(null);
   const [editing, setEditing] = useState<{ page: number; x: number; y: number; cssW: number; value: string; kind: "textbox" | "note" | "callout"; tail?: [number, number] } | null>(null);
   const [sigOpen, setSigOpen] = useState(false);
@@ -1668,13 +1669,33 @@ export default function Viewer({
                   onChange={(e) => setToolState({ ...toolState, color: e.target.value })}
                 />
               </span>
-              <WidthPreview width={1.4} label="" selected={toolState.width <= 3}
-                onClickOverride={() => setToolState({ ...toolState, width: 2 })} />
-              <WidthPreview width={4.5} label="" selected={toolState.width > 3}
-                onClickOverride={() => setToolState({ ...toolState, width: 6 })} />
-              <button className="width-chip" style={{ background: toolState.color }}>
+              <WidthPreview width={1.4} label="" selected={toolState.width <= 3 && !widthOpen}
+                onClickOverride={() => { setToolState({ ...toolState, width: 2 }); setWidthOpen(false); }} />
+              <WidthPreview width={4.5} label="" selected={toolState.width > 3 && !widthOpen}
+                onClickOverride={() => { setToolState({ ...toolState, width: 6 }); setWidthOpen(false); }} />
+              <button
+                className="width-chip"
+                style={{ background: toolState.color, outline: widthOpen ? "2px solid var(--text)" : "none" }}
+                onClick={() => setWidthOpen((v) => !v)}
+                title="Stroke size"
+              >
                 {toolState.width} ▾
               </button>
+              {widthOpen && (
+                <span className="width-pop">
+                  <input
+                    type="range" min={1} max={30} step={0.5}
+                    value={toolState.width}
+                    onChange={(e) => setToolState({ ...toolState, width: Number(e.target.value) })}
+                  />
+                  <input
+                    type="number" min={1} max={30} step={0.5}
+                    className="width-num"
+                    value={toolState.width}
+                    onChange={(e) => setToolState({ ...toolState, width: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })}
+                  />
+                </span>
+              )}
             </div>
           )}
 

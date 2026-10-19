@@ -851,3 +851,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .home--dark .modal--light h2 { color: var(--text); }
 .home--dark .modal--light .newdoc-row span { color: var(--text-muted); }
 .home--dark .modal--light .home__search { background: var(--chrome-deep); border-color: var(--chrome-border); color: var(--text); }
+
+.width-pop {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--chrome-raised); border: 1px solid var(--chrome-border);
+  border-radius: 8px; padding: 4px 10px; height: 32px;
+}
+.width-pop input[type="range"] { width: 130px; accent-color: var(--accent); }
+.width-num {
+  width: 52px; height: 24px; border-radius: 6px; border: 1px solid var(--chrome-border);
+  background: var(--chrome-deep); color: var(--text); font-size: 12px; padding: 0 6px;
+}
