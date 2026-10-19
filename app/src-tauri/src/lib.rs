@@ -62,7 +62,7 @@ $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($b.X, $b.Y, 0, 0, $b.Size)
 $bmp.Save('PATH', [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
-"#.replace("PATH", &temp_path.replace(''', "''"));
+"#.replace("PATH", &temp_path.replace("'", "''"));
     let out = std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", &script])
         .output()
